@@ -197,6 +197,25 @@ function difficultyOptions(selected = '') {
   return LUOGU_DIFFICULTIES.map((d) => `<option value="${d.value}" ${value === d.value ? 'selected' : ''}>${d.label}</option>`).join('');
 }
 
+const SCORING_MODES = [
+  { value: 'oi', label: 'OI 按点累计' },
+  { value: 'acm', label: 'ACM 全过得分' },
+];
+const CHECKER_MODES = [
+  { value: 'standard', label: '标准比较' },
+  { value: 'ignore_space', label: '忽略空白' },
+  { value: 'case_insensitive', label: '大小写不敏感' },
+  { value: 'float', label: '浮点误差' },
+];
+function optionFromList(items, selected = '') {
+  return items.map((item) => `<option value="${item.value}" ${selected === item.value ? 'selected' : ''}>${item.label}</option>`).join('');
+}
+function labelFromList(items, value, fallback = '默认') {
+  return items.find((item) => item.value === value)?.label || fallback;
+}
+function scoringModeLabel(value) { return labelFromList(SCORING_MODES, value || 'oi', 'OI 按点累计'); }
+function checkerModeLabel(value) { return labelFromList(CHECKER_MODES, value || 'standard', '标准比较'); }
+
 const SUBMISSION_LANGUAGES = [
   { value: 'cpp11', label: 'C++11' },
   { value: 'cpp14', label: 'C++14' },
@@ -598,14 +617,14 @@ async function renderProblem(id) {
   const p = data.problem;
   app.innerHTML = `
     <div class="card problem-card">
-      <div class="row space">
-        <div>
+      <div class="problem-head row space">
+        <div class="problem-heading">
           <h1 class="problem-title">${esc(p.id)} ${esc(p.title)}</h1>
-          <p class="muted">时间限制：${p.timeLimit} ms　内存限制：${p.memoryLimit} MB　难度：${difficultyBadge(p.difficulty)}</p>
+          <p class="problem-meta muted">时间限制：${p.timeLimit} ms　内存限制：${p.memoryLimit} MB　难度：${difficultyBadge(p.difficulty)}　评分：${esc(scoringModeLabel(p.scoringMode))}　比较：${esc(checkerModeLabel(p.checkerMode))}</p>
         </div>
         ${currentUser?.role === 'admin' ? `<div class="row actions">${routeLink(`/admin/problem/${problemUrl(p.id)}/edit`, '编辑', 'btn')}${routeLink(`/admin/problem/${problemUrl(p.id)}/data`, '测试数据', 'btn')}</div>` : ''}
       </div>
-      <p>${(p.tags || []).map((t) => `<span class="badge">${esc(t)}</span>`).join('')}${p.isPublic ? '' : '<span class="badge warn">隐藏</span>'}</p>
+      <div class="problem-tags">${(p.tags || []).map((t) => `<span class="problem-tag">${esc(t)}</span>`).join('')}${p.isPublic ? '' : '<span class="problem-tag warn">隐藏</span>'}</div>
       <div class="markdown problem-statement">${renderMarkdown(p.description || '暂无题面')}</div>
     </div>
     <div class="card">
@@ -633,8 +652,8 @@ async function renderProblem(id) {
 
 function renderCaseTable(_problemId, cases) {
   if (!cases.length) return '<p class="muted">暂无测试点。</p>';
-  return `<table><thead><tr><th>#</th><th>分数</th><th>输入文件</th><th>输出文件</th></tr></thead><tbody>${cases.map((c) => `
-    <tr><td>${c.sort}</td><td>${c.score}</td><td>${esc(c.inputPath)}</td><td>${esc(c.outputPath)}</td></tr>`).join('')}</tbody></table>`;
+  return `<table><thead><tr><th>#</th><th>子任务</th><th>分数</th><th>输入文件</th><th>输出文件</th></tr></thead><tbody>${cases.map((c) => `
+    <tr><td>${c.sort}</td><td>${c.subtask ? esc(c.subtask) : '<span class="muted">--</span>'}</td><td>${c.score}</td><td>${esc(c.inputPath)}</td><td>${esc(c.outputPath)}</td></tr>`).join('')}</tbody></table>`;
 }
 
 async function renderSubmissions() {
@@ -675,8 +694,8 @@ window.rejudge = async (id) => {
 
 function renderDetails(details) {
   if (!details.length) return '<p class="muted">暂无测试点详情。</p>';
-  return `<table><thead><tr><th>#</th><th>状态</th><th>分数</th><th>时间</th><th>信息</th></tr></thead><tbody>${details.map((d) => `
-    <tr><td>${d.sort}</td><td><span class="status ${statusClass(d.status)}">${esc(d.status)}</span></td><td>${d.score}</td><td>${d.timeMs} ms</td><td>${esc(d.message || '')}</td></tr>`).join('')}</tbody></table>`;
+  return `<table><thead><tr><th>#</th><th>子任务</th><th>状态</th><th>分数</th><th>时间</th><th>信息</th></tr></thead><tbody>${details.map((d) => `
+    <tr><td>${d.sort}</td><td>${d.subtask ? esc(d.subtask) : '<span class="muted">--</span>'}</td><td><span class="status ${statusClass(d.status)}">${esc(d.status)}</span></td><td>${d.score}</td><td>${d.timeMs} ms</td><td>${esc(d.message || '')}</td></tr>`).join('')}</tbody></table>`;
 }
 
 
@@ -1459,6 +1478,9 @@ function collectProblemForm(form, existingId) {
     difficulty: f.difficulty || 'unrated',
     timeLimit: Number(f.timeLimit) || 1000,
     memoryLimit: Number(f.memoryLimit) || 128,
+    scoringMode: f.scoringMode || 'oi',
+    checkerMode: f.checkerMode || 'standard',
+    checkerTolerance: Number(f.checkerTolerance) || 0.000001,
     isPublic: Boolean(form.querySelector('[name="isPublic"]')?.checked),
   };
 }
@@ -1493,7 +1515,7 @@ function problemCreateCaseSection() {
     </div>
     <div id="zipCasePanel" class="testcase-panel">
       ${filePicker('zipFile', 'zipCaseFileName', '选择 zip 文件')}
-      <p class="muted upload-help">支持 .zip，自动识别同名 .in + .out/.ans</p>
+      <p class="muted upload-help">支持 .zip，自动识别同名 .in + .out/.ans；目录名会作为子任务。</p>
       <label class="checkbox-line"><input type="checkbox" name="zipAutoScore" checked /> 自动平均分配 100 分</label>
     </div>
     <div id="manualCasePanel" class="testcase-panel hidden">
@@ -1507,7 +1529,7 @@ async function renderProblemEditor(id) {
   setImmersive(false);
   if (currentUser?.role !== 'admin') return renderLogin();
   const isNew = id === 'new';
-  let p = { id: '', title: '', description: '', tags: [], difficulty: 'beginner', timeLimit: 1000, memoryLimit: 128, isPublic: true };
+  let p = { id: '', title: '', description: '', tags: [], difficulty: 'beginner', timeLimit: 1000, memoryLimit: 128, scoringMode: 'oi', checkerMode: 'standard', checkerTolerance: 0.000001, isPublic: true };
   if (!isNew) p = (await api(problemApi(id))).problem;
   if (isNew) {
     try { p.id = (await api('/api/problems/next-id')).id; } catch (_) { p.id = ''; }
@@ -1529,6 +1551,11 @@ async function renderProblemEditor(id) {
           <div class="grid two">
             <div>${requiredLabel('时间限制 ms')}<input name="timeLimit" value="${esc(p.timeLimit)}" /></div>
             <div>${requiredLabel('内存限制 MB')}<input name="memoryLimit" value="${esc(p.memoryLimit)}" /></div>
+          </div>
+          <div class="grid three">
+            <div>${requiredLabel('评分方式')}<select name="scoringMode">${optionFromList(SCORING_MODES, p.scoringMode || 'oi')}</select></div>
+            <div>${requiredLabel('输出比较')}<select name="checkerMode">${optionFromList(CHECKER_MODES, p.checkerMode || 'standard')}</select></div>
+            <div><label>浮点误差</label><input name="checkerTolerance" value="${esc(p.checkerTolerance || 0.000001)}" placeholder="如 0.000001" /></div>
           </div>
           <label>标签，逗号分隔</label><input name="tags" value="${esc((p.tags || []).join(','))}" placeholder="例如 图论,LCA,树形DP" />
           ${mdEditor('description', '题面', p.description, { required: true, maxLength: 50000 })}
@@ -1596,7 +1623,7 @@ async function renderCaseManager(problemId) {
     </div>
     <div class="card">
       <h2>zip 批量上传测试数据</h2>
-      <p class="muted">选择 zip 后会自动解压并识别同名的 <code>.in</code> 与 <code>.out/.ans</code> 文件，例如 <code>1.in</code> + <code>1.out</code>。</p>
+      <p class="muted">选择 zip 后会自动解压并识别同名的 <code>.in</code> 与 <code>.out/.ans</code> 文件，例如 <code>1.in</code> + <code>1.out</code>；目录名会作为子任务。</p>
       <form id="caseZipForm" class="zip-form">
         ${filePicker('file', 'caseZipFileName', '选择 zip 文件')}
         <label class="checkbox-line"><input type="checkbox" name="replace" checked /> 覆盖当前测试点</label>
@@ -1610,6 +1637,7 @@ async function renderCaseManager(problemId) {
       <form id="caseAddForm" class="grid two">
         <div><label>输入数据</label><textarea name="input" class="case-text"></textarea></div>
         <div><label>标准输出</label><textarea name="output" class="case-text"></textarea></div>
+        <div><label>子任务</label><input name="subtask" placeholder="可选，如 subtask1" /></div>
         <div><label>分数</label><input name="score" value="${cases.length ? 0 : 100}" /></div>
         <div><label>排序</label><input name="sort" placeholder="留空自动追加" /></div>
         <p><button class="primary">添加测试点</button></p>
@@ -1638,7 +1666,7 @@ async function renderCaseManager(problemId) {
     e.preventDefault();
     try {
       const f = formData(e.target);
-      await api(problemApi(problemId, '/cases'), { method: 'POST', body: { input: f.input, output: f.output, score: Number(f.score) || 0, sort: Number(f.sort) || undefined } });
+      await api(problemApi(problemId, '/cases'), { method: 'POST', body: { input: f.input, output: f.output, subtask: f.subtask || '', score: Number(f.score) || 0, sort: Number(f.sort) || undefined } });
       nav(`/admin/problem/${problemUrl(problemId)}/data`);
     } catch (err) { showInlineError('#caseMsg', err); }
   };
@@ -1647,7 +1675,7 @@ async function renderCaseManager(problemId) {
       e.preventDefault();
       const caseId = e.target.dataset.caseId;
       const f = formData(e.target);
-      await api(problemApi(problemId, `/cases/${caseId}`), { method: 'PUT', body: { input: f.input, output: f.output, score: Number(f.score) || 0, sort: Number(f.sort) || 0 } });
+      await api(problemApi(problemId, `/cases/${caseId}`), { method: 'PUT', body: { input: f.input, output: f.output, subtask: f.subtask || '', score: Number(f.score) || 0, sort: Number(f.sort) || 0 } });
       nav(`/admin/problem/${problemUrl(problemId)}/data`);
     };
   });
@@ -1660,7 +1688,7 @@ function renderCaseEditorBlock(problemId, c) {
   return `<form class="case-edit-form case-block" data-case-id="${esc(c.id)}">
     <div class="row space"><h3>#${esc(c.sort)} 测试点</h3><button type="button" class="danger case-delete-btn" data-problem-id="${esc(problemId)}" data-case-id="${esc(c.id)}">删除</button></div>
     <div class="grid two"><div><label>输入</label><textarea name="input" class="case-text">${esc(c.input)}</textarea></div><div><label>标准输出</label><textarea name="output" class="case-text">${esc(c.output)}</textarea></div></div>
-    <div class="grid two"><div><label>分数</label><input name="score" value="${esc(c.score)}" /></div><div><label>排序</label><input name="sort" value="${esc(c.sort)}" /></div></div>
+    <div class="grid three"><div><label>子任务</label><input name="subtask" value="${esc(c.subtask || '')}" placeholder="可选" /></div><div><label>分数</label><input name="score" value="${esc(c.score)}" /></div><div><label>排序</label><input name="sort" value="${esc(c.sort)}" /></div></div>
     <p><button>保存测试点</button></p>
   </form>`;
 }
@@ -1697,15 +1725,15 @@ window.rejudgeProblem = async (id) => runUiAction(
   (result) => alert(`已重置 ${result.changed} 条提交为等待评测。`),
 );
 
-function importCaseItem(input = '', output = '', score = '') {
+function importCaseItem(input = '', output = '', score = '', subtask = '') {
   return `<div class="case-draft-item">
     <div class="row space"><b>测试点</b><button type="button" onclick="this.closest('.case-draft-item').remove(); renumberImportCases();">删除</button></div>
     <div class="grid two"><div><label>输入</label><textarea name="caseInput" class="case-text">${esc(input)}</textarea></div><div><label>标准输出</label><textarea name="caseOutput" class="case-text">${esc(output)}</textarea></div></div>
-    <label>分数</label><input name="caseScore" value="${esc(score)}" placeholder="留空则为 0" />
+    <div class="grid two"><div><label>子任务</label><input name="caseSubtask" value="${esc(subtask)}" placeholder="可选，如 subtask1" /></div><div><label>分数</label><input name="caseScore" value="${esc(score)}" placeholder="留空则为 0" /></div></div>
   </div>`;
 }
 window.renumberImportCases = () => qsa('.case-draft-item b').forEach((x, i) => { x.textContent = `测试点 #${i + 1}`; });
-window.addImportCase = (input = '', output = '', score = '') => { qs('#importCasesBox').insertAdjacentHTML('beforeend', importCaseItem(input, output, score)); renumberImportCases(); };
+window.addImportCase = (input = '', output = '', score = '', subtask = '') => { qs('#importCasesBox').insertAdjacentHTML('beforeend', importCaseItem(input, output, score, subtask)); renumberImportCases(); };
 window.setCaseInputMode = (mode) => {
   qsa('.case-mode-btn').forEach((x) => x.classList.toggle('active', x.dataset.mode === mode));
   qs('#zipCasePanel').classList.toggle('hidden', mode !== 'zip');
@@ -1716,6 +1744,7 @@ function collectImportCases(form) {
   return qsa('.case-draft-item', form).map((item) => ({
     input: qs('[name="caseInput"]', item).value,
     output: qs('[name="caseOutput"]', item).value,
+    subtask: qs('[name="caseSubtask"]', item)?.value || '',
     score: Number(qs('[name="caseScore"]', item).value) || 0,
   })).filter((c) => c.input || c.output);
 }

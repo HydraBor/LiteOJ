@@ -129,6 +129,8 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+Compose 中的 judge 服务默认非 root、只读、无特权运行，并且不挂载 `data/` 数据卷。默认 `JUDGE_SANDBOX=host` 适合本机和内网教学；公网开放给陌生用户时，建议把 judge worker 单独部署到隔离主机或 VM，并开启 `JUDGE_SANDBOX=docker` 或替换为 isolate/nsjail/gVisor/Firecracker。
+
 停止：
 
 ```bash
@@ -187,6 +189,12 @@ JWT_SECRET=replace-this-with-a-long-random-string
 JUDGE_TOKEN=replace-this-judge-token
 BACKEND_URL=http://app:3000
 JUDGE_POLL_INTERVAL_MS=2000
+JUDGE_MAX_OUTPUT_BYTES=1048576
+JUDGE_SANDBOX=host
+JUDGE_SANDBOX_IMAGE=liteoj:latest
+JUDGE_SANDBOX_CPUS=1
+JUDGE_PROCESS_LIMIT=64
+JUDGE_FILE_LIMIT_KB=65536
 COOKIE_SECURE=auto
 ```
 
@@ -219,5 +227,6 @@ tar -xzf liteoj-data-YYYY-MM-DD.tar.gz
 - 部署后确认响应头中包含 `X-Content-Type-Options: nosniff`，并且不再暴露 `X-Powered-By`。
 - 尽量使用 HTTPS。
 - 公网部署时限制后台访问或开启更强的服务器安全策略。
-- judge 当前为教学级隔离，公开给陌生用户使用前建议替换为更强沙箱。
+- judge 默认 `host` 模式仍是轻量隔离；公开给陌生用户使用时建议在独立 judge 主机启用 `JUDGE_SANDBOX=docker`，或接入 isolate/nsjail/gVisor/Firecracker。
+- 不建议让 Web 服务和 judge 共享同一高权限用户；judge 不需要挂载 `data/`，只通过 API 领取测试数据。
 - 定期备份数据。

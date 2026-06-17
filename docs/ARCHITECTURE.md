@@ -81,6 +81,9 @@ tags_json
 difficulty
 time_limit
 memory_limit
+scoring_mode
+checker_mode
+checker_tolerance
 is_public
 created_by
 created_at
@@ -100,6 +103,8 @@ updated_at
 ```text
 data/problems/P1001/testdata/
 ```
+
+`problem_cases` 额外保存 `subtask`。子任务为空时按单测试点计分；多个测试点共享同一 `subtask` 时，该组必须全部通过才会获得组内分数。
 
 附件目录：
 
@@ -169,20 +174,31 @@ POST /api/problems/:id/cases/zip
 2. 忽略目录、`__MACOSX` 和非数据文件；
 3. 识别同名 `.in` 与 `.out/.ans`；
 4. 自然排序；
-5. 写入 `data/problems/<id>/testdata/`；
-6. 同步写入 `problem_cases`；
-7. 根据参数覆盖旧数据或追加数据；
-8. 可自动平均分配 100 分。
+5. 目录名写入 `subtask` 字段；
+6. 写入 `data/problems/<id>/testdata/`；
+7. 同步写入 `problem_cases`；
+8. 根据参数覆盖旧数据或追加数据；
+9. 可自动平均分配 100 分。
 
 ## 7. Judge 设计
 
-当前 judge 是教学级实现：
+当前 judge 支持两种模式：
 
 ```text
-timeout + ulimit + 独立工作目录
+host: timeout + ulimit + 独立工作目录
+docker: 每次编译/运行进入无网络、限内存、限进程、只读根文件系统的 Docker 容器
 ```
 
-它适合本地、内网和小规模课程训练。公网开放时建议替换为 isolate、nsjail、gVisor、Firecracker 或独立容器沙箱。
+`host` 适合本地、内网和小规模课程训练。公网开放时建议把 judge worker 放到独立主机或隔离 VM，启用 `JUDGE_SANDBOX=docker`，或替换为 isolate、nsjail、gVisor、Firecracker 等更强沙箱。
+
+评测结算支持：
+
+```text
+OI 按点累计
+ACM 全过得分
+子任务整组得分
+标准比较 / 忽略空白 / 大小写不敏感 / 浮点误差
+```
 
 ## 8. 前端路由
 

@@ -37,6 +37,7 @@ router.post('/acquire', requireJudge, (req, res) => {
   const caseRows = db.prepare('SELECT * FROM problem_cases WHERE problem_id = ? ORDER BY sort, id').all(p.id);
   const cases = caseRows.map((c) => ({
     id: c.id,
+    subtask: c.subtask || '',
     score: c.score,
     sort: c.sort,
     input: readDataFile(c.input_path),

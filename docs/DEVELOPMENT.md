@@ -156,6 +156,16 @@ ABC2 < ABC10 < B1 < P1 < P10
 
 题面只保留一个 Markdown 字段 `description`，输入格式、输出格式、样例、提示和数据范围都写在这个字段中。
 
+编程题评测配置：
+
+```text
+scoringMode: oi / acm
+checkerMode: standard / ignore_space / case_insensitive / float
+checkerTolerance: 浮点比较误差，默认 1e-6
+```
+
+`oi` 表示按测试点或子任务累计分数；`acm` 表示全部测试点通过才获得本题全部分数。
+
 ### 4.3 测试点管理
 
 测试点记录在 `problem_cases` 表中，实际文件存储在：
@@ -178,6 +188,8 @@ POST /api/problems/:id/cases/zip
 subtask/1.in + subtask/1.out
 ```
 
+zip 中的目录名会写入 `problem_cases.subtask`。同一 `subtask` 下只要有测试点失败，该子任务内所有测试点均不得分；没有子任务名的测试点按单点计分。
+
 后台删除测试点调用：
 
 ```text
@@ -197,7 +209,7 @@ submissions 表写入 Waiting
 ↓
 judge worker 轮询 /api/judge/acquire
 ↓
-编译、运行、逐测试点比较
+编译、运行、逐测试点比较，按 OI/ACM/子任务规则结算
 ↓
 POST /api/judge/:id/result
 ↓
@@ -218,7 +230,14 @@ PA
 SE
 ```
 
-当前 judge 为教学级轻量隔离：`timeout + ulimit + 临时目录`。
+judge 支持两种运行模式：
+
+```text
+JUDGE_SANDBOX=host    # 默认，本地 timeout + ulimit + 临时目录
+JUDGE_SANDBOX=docker  # 每次编译/运行进入无网络 Docker 容器
+```
+
+`docker` 模式会使用 `JUDGE_SANDBOX_IMAGE`，默认 `liteoj:latest`。公网部署时建议把 judge worker 放在独立主机或隔离 VM，并启用 Docker/isolate/nsjail/gVisor/Firecracker 等强沙箱；不要把陌生用户代码直接放在 Web 服务所在权限边界内运行。
 
 ### 4.5 初赛题库
 
@@ -476,7 +495,7 @@ npm run real-smoke
 npm test
 ```
 
-`real-smoke` 会创建临时数据目录和端口，测试登录、新增题、编辑题、测试点、zip 上传、复制、隐藏/公开、删除、提交、初赛题库和模考接口。
+`real-smoke` 会创建临时数据目录和端口，测试登录、新增题、编辑题、评分/checker 配置、测试点子任务、zip 上传、复制、隐藏/公开、删除、提交、初赛题库和模考接口。
 
 ## 9. 后续开发建议
 

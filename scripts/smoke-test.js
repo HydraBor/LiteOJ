@@ -7,11 +7,13 @@ const {
   sortProblems,
 } = require('../backend/problem-utils');
 const { parsePaperQuestions, normalizeGroupName } = require('../backend/prelim-utils');
+const { compareOutput } = require('../judge/checker');
+const { applyScoring } = require('../judge/runner');
 
 function ids(list) { return list.map((x) => x.id); }
 
 const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-assert.strictEqual(packageJson.version, '1.2.3', 'package version should be 1.2.3 after analytics filter redesign');
+assert.strictEqual(packageJson.version, '1.3.0', 'package version should be 1.3.0 after judge system upgrade');
 assert(!('sync-cutoffs' in packageJson.scripts), 'retired cutoff synchronization script should not remain in package scripts');
 assert(!fs.existsSync(path.join(__dirname, '..', 'scripts', 'sync-cutoffs.js')), 'retired cutoff synchronization script should be removed');
 assert(!fs.existsSync(path.join(__dirname, '..', 'seed', 'cutoffs')), 'retired cutoff seed directory should be removed');
@@ -45,6 +47,23 @@ assert.deepStrictEqual(ids(sortProblems([
   { id: 'A2', title: 'x' },
   { id: 'AA1', title: 'x' },
 ])), ['A2', 'A100', 'AA1', 'P2', 'P10']);
+
+assert(compareOutput('1  2\n3\n', '1 2 3\n', { mode: 'ignore_space' }), 'ignore_space checker should compare token streams');
+assert(compareOutput('Yes\n', 'yes\n', { mode: 'case_insensitive' }), 'case_insensitive checker should ignore letter case');
+assert(compareOutput('3.1415926\n', '3.141593\n', { mode: 'float', tolerance: 0.00001 }), 'float checker should accept answers within tolerance');
+assert(!compareOutput('3.14\n', '3.20\n', { mode: 'float', tolerance: 0.00001 }), 'float checker should reject answers outside tolerance');
+const subtaskScore = applyScoring([
+  { caseId: 1, subtask: 's1', status: 'Accepted', rawScore: 30, score: 0 },
+  { caseId: 2, subtask: 's1', status: 'Wrong Answer', rawScore: 30, score: 0 },
+  { caseId: 3, subtask: 's2', status: 'Accepted', rawScore: 40, score: 0 },
+], 'oi');
+assert.strictEqual(subtaskScore.status, 'Partially Accepted', 'subtask scoring should keep partial status');
+assert.strictEqual(subtaskScore.score, 40, 'failed subtask should award zero for every case in the group');
+const acmScore = applyScoring([
+  { caseId: 1, status: 'Accepted', rawScore: 50, score: 0 },
+  { caseId: 2, status: 'Wrong Answer', rawScore: 50, score: 0 },
+], 'acm');
+assert.strictEqual(acmScore.score, 0, 'ACM scoring should be all-or-nothing');
 
 const paperMd = fs.readFileSync(path.join(__dirname, '..', 'seed', 'prelim', '2025-CSP-J1.md'), 'utf8');
 const solutionMd = fs.readFileSync(path.join(__dirname, '..', 'seed', 'prelim', '2025-CSP-J1-solution.md'), 'utf8');
@@ -227,9 +246,20 @@ assert(appJs.includes('path.match(/^\\/admin\\/problem\\/([A-Z]+\\d+)\\/edit$/)'
 assert(appJs.includes('path.match(/^\\/admin\\/problem\\/([A-Z]+\\d+)\\/data$/)') && appJs.includes('return await renderCaseManager(m[1]);') || appJs.includes('return renderCaseManager(m[1]);'), 'testdata route should dispatch to renderCaseManager');
 assert(appJs.includes('async function saveProblemEditor') && appJs.includes("const method = isNew ? 'POST' : 'PUT'") && appJs.includes("const url = isNew ? '/api/problems' : problemApi(body.id)"), 'problem editor save should distinguish create/update');
 
-console.log('Smoke tests passed: programming problems and CSP preliminary question bank logic look consistent.');
-
 const dbJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'db.js'), 'utf8');
-for (const col of ["ensureColumn('problems', 'description'", "ensureColumn('problems', 'tags_json'", "ensureColumn('problems', 'time_limit'", "ensureColumn('submissions', 'optimize'"]) {
+for (const col of [
+  "ensureColumn('problems', 'description'",
+  "ensureColumn('problems', 'tags_json'",
+  "ensureColumn('problems', 'time_limit'",
+  "ensureColumn('problems', 'scoring_mode'",
+  "ensureColumn('problems', 'checker_mode'",
+  "ensureColumn('problem_cases', 'subtask'",
+  "ensureColumn('submissions', 'optimize'",
+]) {
   assert(dbJs.includes(col), `database migration missing ${col}`);
 }
+assert(appJs.includes('SCORING_MODES') && appJs.includes('CHECKER_MODES') && appJs.includes('name="scoringMode"') && appJs.includes('name="checkerMode"') && appJs.includes('name="subtask"'), 'frontend should expose scoring, checker, and subtask controls');
+const sandboxJs = fs.readFileSync(path.join(__dirname, '..', 'judge', 'sandbox.js'), 'utf8');
+assert(sandboxJs.includes("'--network', 'none'") && sandboxJs.includes("'--read-only'") && sandboxJs.includes("'--cap-drop', 'ALL'"), 'docker sandbox should disable network and drop container privileges');
+
+console.log('Smoke tests passed: programming problems, judge modes, and CSP preliminary question bank logic look consistent.');

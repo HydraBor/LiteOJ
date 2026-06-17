@@ -1,0 +1,22 @@
+<svg width="152" height="42" viewBox="0 0 152 42" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="LiteOJ">
+  <defs>
+    <linearGradient id="liteoj-full-g" x1="5" y1="4" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#26C6F6"/>
+      <stop offset="0.52" stop-color="#1685F3"/>
+      <stop offset="1" stop-color="#174FEA"/>
+    </linearGradient>
+    <linearGradient id="liteoj-word-g" x1="50" y1="8" x2="134" y2="34" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#101A3A"/>
+      <stop offset="0.58" stop-color="#162B63"/>
+      <stop offset="1" stop-color="#2175F5"/>
+    </linearGradient>
+    <filter id="liteoj-full-shadow" x="0" y="0" width="48" height="48" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="#1665F1" flood-opacity="0.24"/>
+    </filter>
+  </defs>
+  <g filter="url(#liteoj-full-shadow)">
+    <rect x="4" y="4" width="34" height="34" rx="10" fill="url(#liteoj-full-g)"/>
+    <path d="M15.2 12.8C15.46 11.72 16.42 10.98 17.52 10.98H21.86C22.8 10.98 23.49 11.88 23.22 12.79L19.52 25.42H29.25C30.31 25.42 31.06 26.46 30.71 27.47L29.57 30.81C29.29 31.63 28.51 32.18 27.64 32.18H13.75C12.29 32.18 11.23 30.81 11.57 29.39L15.2 12.8Z" fill="white"/>
+  </g>
+  <text x="50" y="28" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="23" font-weight="850" letter-spacing="-0.9" fill="url(#liteoj-word-g)">LiteOJ</text>
+</svg>

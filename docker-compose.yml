@@ -1,0 +1,38 @@
+services:
+  app:
+    build: .
+    container_name: liteoj-app
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      DATA_DIR: /app/data
+      DATABASE_PATH: /app/data/liteoj.db
+      JWT_SECRET: ${JWT_SECRET:-liteoj-dev-secret-change-me}
+      JUDGE_TOKEN: ${JUDGE_TOKEN:-liteoj-dev-judge-token}
+    ports:
+      - "3000:3000"
+    volumes:
+      - liteoj-data:/app/data
+    command: sh -lc "node scripts/init.js && node backend/server.js"
+    restart: unless-stopped
+
+  judge:
+    build: .
+    container_name: liteoj-judge
+    environment:
+      NODE_ENV: production
+      BACKEND_URL: http://app:3000
+      DATA_DIR: /app/data
+      DATABASE_PATH: /app/data/liteoj.db
+      JUDGE_TOKEN: ${JUDGE_TOKEN:-liteoj-dev-judge-token}
+      JUDGE_ID: local-judge-1
+      JUDGE_POLL_INTERVAL_MS: 2000
+    depends_on:
+      - app
+    volumes:
+      - liteoj-data:/app/data
+    command: node judge/worker.js
+    restart: unless-stopped
+
+volumes:
+  liteoj-data:

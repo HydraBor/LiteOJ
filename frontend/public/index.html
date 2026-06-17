@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LiteOJ</title>
+  <link rel="icon" type="image/svg+xml" href="/logo-mark.svg" />
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="nav-inner">
+      <div class="brand" data-route="/problems" role="button" tabindex="0" aria-label="LiteOJ 首页"><img src="/logo.svg" alt="LiteOJ" class="brand-logo" /></div>
+      <nav class="main-nav" aria-label="主导航">
+        <button type="button" data-nav="problems" data-route="/problems">编程题库</button>
+        <button type="button" id="submissionsNav" data-nav="submissions" class="hidden" data-route="/submissions">提交记录</button>
+        <button type="button" data-nav="prelim" data-route="/prelim">初赛题库</button>
+        <button type="button" data-nav="mock" data-route="/prelim/mock">初赛模考</button>
+        <button type="button" data-nav="analytics" data-route="/analytics">数据分析</button>
+        <button type="button" id="adminNav" data-nav="admin" class="hidden" data-route="/admin">后台管理</button>
+      </nav>
+      <div id="userBox" class="auth-actions"></div>
+    </div>
+  </header>
+  <main id="app" class="container"></main>
+  <script defer src="/vendor/katex/katex.min.js"></script>
+  <script defer src="/app.js"></script>
+</body>
+</html>

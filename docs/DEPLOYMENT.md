@@ -121,7 +121,49 @@ sudo systemctl reload nginx
 
 HTTPS 可使用 certbot 或云厂商证书。
 
-## 6. Docker Compose 部署
+## 6. 一键 Docker 部署
+
+推荐在云服务器上使用：
+
+```bash
+cd LiteOJ
+chmod +x ./liteoj.sh ./litoj.sh
+./liteoj.sh start
+```
+
+`liteoj.sh` 会：
+
+1. 自动创建 `.env` 并生成随机 `JWT_SECRET` / `JUDGE_TOKEN`；
+2. 检查 Docker Engine 和 Docker Compose plugin；
+3. 缺失时在 Ubuntu/Debian 上自动安装 Docker；
+4. 写入 Docker registry mirror；
+5. 重启 Docker daemon，让 mirror 配置立即生效；
+6. 构建前预拉取 `node:22-bookworm-slim`，如果 Docker Hub 超时会尝试国内 mirror 地址。
+
+如果看到下面这种错误：
+
+```text
+failed to resolve source metadata for docker.io/library/node:22-bookworm-slim
+dial tcp ... registry-1.docker.io:443: i/o timeout
+```
+
+说明 Docker daemon 没有加载 mirror 配置，或当前网络无法直连 Docker Hub。请使用新版 `liteoj.sh`，或手动执行：
+
+```bash
+sudo tee /etc/docker/daemon.json >/dev/null <<'JSON'
+{
+  "registry-mirrors": [
+    "https://docker.1ms.run",
+    "https://docker.m.daocloud.io"
+  ]
+}
+JSON
+sudo systemctl restart docker || sudo service docker restart
+docker info | grep -A5 "Registry Mirrors"
+docker pull node:22-bookworm-slim
+```
+
+## 7. Docker Compose 手动部署
 
 ```bash
 cp .env.example .env
@@ -141,7 +183,7 @@ docker compose down
 docker compose down -v
 ```
 
-## 7. WSL 局域网访问
+## 8. WSL 局域网访问
 
 WSL 内启动：
 
@@ -174,7 +216,7 @@ ipconfig
 http://Windows局域网IP:3000
 ```
 
-## 8. 环境变量
+## 9. 环境变量
 
 常用配置：
 
@@ -197,7 +239,7 @@ JWT_SECRET
 JUDGE_TOKEN
 ```
 
-## 9. 备份与恢复
+## 10. 备份与恢复
 
 备份：
 
@@ -213,7 +255,7 @@ tar -xzf liteoj-data-YYYY-MM-DD.tar.gz
 
 备份重点是 `data/`，其中包含数据库、测试点和附件。
 
-## 10. 安全建议
+## 11. 安全建议
 
 - 不要长期使用默认管理员密码。
 - 部署后确认响应头中包含 `X-Content-Type-Options: nosniff`，并且不再暴露 `X-Powered-By`。

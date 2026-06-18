@@ -75,13 +75,22 @@ http://localhost:3000
 admin / admin123
 ```
 
-### Docker Compose 运行
+### 推荐同机部署
 
 ```bash
-cp .env.example .env
-# 修改 JWT_SECRET 和 JUDGE_TOKEN；公网评测建议在独立 judge 主机启用 JUDGE_SANDBOX=docker
-docker compose up -d --build
+chmod +x ./liteoj.sh
+./liteoj.sh start
 ```
+
+脚本会自动检查 Docker、Docker Compose 和宿主机 Node.js；缺失时会尝试安装或准备 portable Node，并配置 Docker 国内镜像。启动后的推荐结构是：
+
+```text
+Web: Docker Compose app 容器
+Judge: 宿主机 Node worker
+用户代码: 每次编译/运行进入无网络 Docker 沙箱容器
+```
+
+已有旧数据库时，脚本不会覆盖已有管理员密码；如果仍是 `admin/admin123`，请登录后立即修改。
 
 访问：
 
@@ -93,19 +102,35 @@ http://localhost:3000
 
 ```bash
 docker compose logs -f app
-docker compose logs -f judge
+tail -f logs/judge.log
 ```
 
 停止：
 
 ```bash
-docker compose down
+./liteoj.sh stop
 ```
 
-清空数据卷：
+查看状态：
 
 ```bash
-docker compose down -v
+./liteoj.sh status
+```
+
+### Docker Compose 开发运行
+
+只启动 Web 容器：
+
+```bash
+cp .env.example .env
+# 修改 JWT_SECRET、JUDGE_TOKEN 和 ADMIN_PASSWORD
+docker compose up -d --build app
+```
+
+如果只是本地或可信内网教学，也可以显式启用容器内 judge profile：
+
+```bash
+docker compose --profile container-judge up -d --build
 ```
 
 ## 常用命令
@@ -158,6 +183,7 @@ LiteOJ/
 ├── scripts/                   # 初始化和测试脚本
 ├── Dockerfile
 ├── docker-compose.yml
+├── liteoj.sh                  # 同机部署一键启动/停止脚本
 └── package.json
 ```
 
@@ -171,14 +197,18 @@ LiteOJ/
 
 ## 安全说明
 
-默认 judge 使用 `timeout + ulimit + 独立临时目录` 的轻量限制，适合本地、内网和小规模教学场景。项目已提供 `JUDGE_SANDBOX=docker` 模式，可将每次编译/运行放入无网络、限内存、限进程、只读根文件系统的 Docker 容器；公网长期开放时建议把 judge worker 部署在独立主机或隔离 VM 上，并启用 Docker/isolate/nsjail/gVisor/Firecracker 等更强沙箱。
+默认代码级 `host` 模式使用 `timeout + ulimit + 独立临时目录` 的轻量限制，只适合本地、内网和可信教学场景。公网同机部署推荐使用 `./liteoj.sh start`：Web 跑在 Docker Compose 容器中，judge worker 跑在宿主机上，但每次编译/运行都会进入 `JUDGE_SANDBOX=docker` 的无网络、限内存、限进程、只读根文件系统容器。
+
+同机部署仍不等于强隔离。更高安全等级的做法仍然是把 judge worker 放到独立主机或隔离 VM，并评估 isolate、nsjail、gVisor 或 Firecracker。不要把 Docker socket 挂给 Web 容器。
 
 正式部署建议：
 
 - 使用 HTTPS。
-- 修改 `.env` 中的 `JWT_SECRET` 和 `JUDGE_TOKEN`。
+- 修改 `.env` 中的 `JWT_SECRET`、`JUDGE_TOKEN` 和 `ADMIN_PASSWORD`；使用 `./liteoj.sh start` 时脚本会自动生成。
 - Web 服务放在 Nginx 反向代理后面。
-- 公网评测不要把 Web 和 judge 放在同一权限边界内；至少让 judge 非 root、无特权运行，并开启沙箱。
+- 公网同机部署时使用宿主机 judge + Docker 沙箱，不要使用容器内 `host` judge 处理陌生用户提交。
+- 生产环境不会默认创建 `admin/admin123`，初始管理员密码来自 `ADMIN_PASSWORD`。
+- 保留登录/注册限速和测试数据 zip 解压总量限制。
 - 定期备份 `data/` 目录。
 - 不要以 root 权限长期运行 judge。
 

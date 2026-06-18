@@ -5,6 +5,9 @@ const { db, DATA_DIR, problemFromRow } = require('../db');
 
 const router = express.Router();
 const JUDGE_TOKEN = process.env.JUDGE_TOKEN || 'dev-judge-token';
+if (process.env.NODE_ENV === 'production' && (!process.env.JUDGE_TOKEN || JUDGE_TOKEN === 'dev-judge-token' || JUDGE_TOKEN.length < 24)) {
+  throw new Error('JUDGE_TOKEN must be set to a strong random value in production');
+}
 
 function requireJudge(req, res, next) {
   const token = req.headers['x-judge-token'];

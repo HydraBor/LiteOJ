@@ -8,23 +8,31 @@ services:
       NODE_ENV: production
       DATA_DIR: /app/data
       DATABASE_PATH: /app/data/liteoj.db
-      JWT_SECRET: ${JWT_SECRET:-liteoj-dev-secret-change-me}
-      JUDGE_TOKEN: ${JUDGE_TOKEN:-liteoj-dev-judge-token}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      JUDGE_TOKEN: ${JUDGE_TOKEN:?JUDGE_TOKEN must be set in .env}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set in .env}
+      TESTDATA_ZIP_LIMIT: ${TESTDATA_ZIP_LIMIT:-50}
+      TESTDATA_UNZIPPED_LIMIT: ${TESTDATA_UNZIPPED_LIMIT:-200}
+      LOGIN_RATE_LIMIT: ${LOGIN_RATE_LIMIT:-20}
+      REGISTER_RATE_LIMIT: ${REGISTER_RATE_LIMIT:-10}
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:3000"
     volumes:
       - liteoj-data:/app/data
     command: sh -lc "node scripts/init.js && node backend/server.js"
     restart: unless-stopped
 
   judge:
+    profiles:
+      - container-judge
     build: .
     image: liteoj:latest
     container_name: liteoj-judge
     environment:
       NODE_ENV: production
       BACKEND_URL: http://app:3000
-      JUDGE_TOKEN: ${JUDGE_TOKEN:-liteoj-dev-judge-token}
+      JUDGE_TOKEN: ${JUDGE_TOKEN:?JUDGE_TOKEN must be set in .env}
       JUDGE_ID: local-judge-1
       JUDGE_POLL_INTERVAL_MS: 2000
       JUDGE_SANDBOX: ${JUDGE_SANDBOX:-host}

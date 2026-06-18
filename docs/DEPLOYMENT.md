@@ -1,6 +1,6 @@
 # LiteOJ 部署手册
 
-本文说明 LiteOJ 的本地、局域网、Docker 和云服务器部署方式。
+本文说明 LiteOJ 的本地、局域网、Docker 和云服务器部署方式。公网同机部署推荐使用项目根目录的 `liteoj.sh`，让 Web 与 judge 保持不同运行边界，并让用户代码进入 Docker 沙箱。
 
 ## 1. 推荐服务器配置
 
@@ -26,9 +26,61 @@ Ubuntu 22.04 / 24.04
 
 Web 和 SQLite 很轻，主要资源消耗来自 C/C++ 编译和 judge worker。
 
-## 2. 云服务器初始化
+## 2. 推荐：同机公网一键部署
 
-以 Ubuntu 为例：
+适用于暂时没有条件拆分 Web 和评测机的服务器：
+
+```bash
+cd /opt
+git clone <你的仓库地址> LiteOJ
+cd LiteOJ
+chmod +x ./liteoj.sh
+./liteoj.sh start
+```
+
+`liteoj.sh start` 会做这些事：
+
+1. 如果 `.env` 不存在，自动生成 `.env`，并写入随机 `JWT_SECRET`、`JUDGE_TOKEN` 和 `ADMIN_PASSWORD`；
+2. 检查 Docker Engine 和 Docker Compose plugin，缺失时在 Ubuntu/Debian 上尝试自动安装；
+3. Docker Hub 访问不稳定时，写入 Docker registry 国内镜像；
+4. 检查宿主机 Node.js，缺失时从国内镜像准备 portable Node.js 22 到 `.runtime/node`；
+5. 启动 `docker compose up -d --build app`，只让 Web 服务进入容器；
+6. 在宿主机启动 `judge/worker.js`，并强制使用 `JUDGE_SANDBOX=docker`；
+7. 每次编译/运行用户代码时创建无网络、限内存、限进程、只读根文件系统的 Docker 沙箱容器。
+
+如果服务器上已经存在旧数据库，脚本不会覆盖已有管理员密码。旧部署仍使用 `admin/admin123` 的，请登录后到个人主页立即修改密码，或清空数据卷后重新初始化。
+
+常用命令：
+
+```bash
+./liteoj.sh status
+./liteoj.sh logs
+./liteoj.sh restart
+./liteoj.sh stop
+```
+
+访问：
+
+```text
+http://服务器IP:3000
+```
+
+如果使用 Nginx/HTTPS，建议只反代到本机：
+
+```text
+http://127.0.0.1:3000
+```
+
+### 脚本安装策略
+
+- Docker 使用官方 apt 仓库安装 Docker Engine、CLI、Buildx 和 Compose plugin；
+- Ubuntu/Debian 的 apt 源如果更新失败，会备份原文件并切换到清华镜像；
+- Docker registry mirror 默认写入 `docker.1ms.run` 和 `docker.m.daocloud.io`，已有自定义 `/etc/docker/daemon.json` 时不会覆盖；
+- Node.js 不强制写入系统目录，优先使用已有 Node/nvm；没有时下载 portable Node.js 到 `.runtime/node`。
+
+## 3. 云服务器手动初始化
+
+如果不使用一键脚本，可以手动安装依赖。以 Ubuntu 为例：
 
 ```bash
 sudo apt update
@@ -51,7 +103,7 @@ g++ --version
 python3 --version
 ```
 
-## 3. 直接部署
+## 4. 直接部署
 
 ```bash
 cd /opt
@@ -71,12 +123,18 @@ npm run judge
 
 生产环境建议用 PM2 或 systemd 守护。
 
-## 4. PM2 守护
+直接部署时，如果面向公网提交编程题，至少让 judge 使用 Docker 沙箱：
+
+```bash
+JUDGE_SANDBOX=docker JUDGE_SANDBOX_IMAGE=liteoj:latest npm run judge
+```
+
+## 5. PM2 守护
 
 ```bash
 sudo npm install -g pm2
 pm2 start backend/server.js --name liteoj-web
-pm2 start judge/worker.js --name liteoj-judge
+JUDGE_SANDBOX=docker JUDGE_SANDBOX_IMAGE=liteoj:latest pm2 start judge/worker.js --name liteoj-judge
 pm2 save
 pm2 startup
 ```
@@ -88,7 +146,7 @@ pm2 logs liteoj-web
 pm2 logs liteoj-judge
 ```
 
-## 5. Nginx 反向代理
+## 6. Nginx 反向代理
 
 建议 Web 服务只作为后端应用运行，外层由 Nginx 提供 80/443。
 
@@ -121,15 +179,23 @@ sudo systemctl reload nginx
 
 HTTPS 可使用 certbot 或云厂商证书。
 
-## 6. Docker Compose 部署
+## 7. Docker Compose 部署
 
 ```bash
 cp .env.example .env
-# 修改 JWT_SECRET / JUDGE_TOKEN
-docker compose up -d --build
+# 修改 JWT_SECRET / JUDGE_TOKEN / ADMIN_PASSWORD
+docker compose up -d --build app
 ```
 
-Compose 中的 judge 服务默认非 root、只读、无特权运行，并且不挂载 `data/` 数据卷。默认 `JUDGE_SANDBOX=host` 适合本机和内网教学；公网开放给陌生用户时，建议把 judge worker 单独部署到隔离主机或 VM，并开启 `JUDGE_SANDBOX=docker` 或替换为 isolate/nsjail/gVisor/Firecracker。
+默认 Compose 只建议启动 `app` 服务，适合作为 Web 容器。公网同机部署请配合 `./liteoj.sh start`，由脚本在宿主机启动 Docker 沙箱 judge。
+
+容器内 judge 只保留给本地和可信内网教学，必须显式启用 profile：
+
+```bash
+docker compose --profile container-judge up -d --build
+```
+
+容器内 judge 默认非 root、只读、无特权运行，并且不挂载 `data/` 数据卷，但它仍属于轻量隔离，不建议处理陌生公网用户提交。
 
 停止：
 
@@ -143,7 +209,7 @@ docker compose down
 docker compose down -v
 ```
 
-## 7. WSL 局域网访问
+## 8. WSL 局域网访问
 
 WSL 内启动：
 
@@ -176,7 +242,7 @@ ipconfig
 http://Windows局域网IP:3000
 ```
 
-## 8. 环境变量
+## 9. 环境变量
 
 常用配置：
 
@@ -186,15 +252,21 @@ NODE_ENV=production
 DATA_DIR=/app/data
 DATABASE_PATH=/app/data/liteoj.db
 JWT_SECRET=replace-this-with-a-long-random-string
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=replace-this-admin-password
 JUDGE_TOKEN=replace-this-judge-token
-BACKEND_URL=http://app:3000
+BACKEND_URL=http://127.0.0.1:3000
 JUDGE_POLL_INTERVAL_MS=2000
 JUDGE_MAX_OUTPUT_BYTES=1048576
-JUDGE_SANDBOX=host
+JUDGE_SANDBOX=docker
 JUDGE_SANDBOX_IMAGE=liteoj:latest
 JUDGE_SANDBOX_CPUS=1
 JUDGE_PROCESS_LIMIT=64
 JUDGE_FILE_LIMIT_KB=65536
+TESTDATA_ZIP_LIMIT=50
+TESTDATA_UNZIPPED_LIMIT=200
+LOGIN_RATE_LIMIT=20
+REGISTER_RATE_LIMIT=10
 COOKIE_SECURE=auto
 ```
 
@@ -203,9 +275,24 @@ COOKIE_SECURE=auto
 ```text
 JWT_SECRET
 JUDGE_TOKEN
+ADMIN_PASSWORD
 ```
 
-## 9. 备份与恢复
+同机宿主机 judge 推荐：
+
+```text
+BACKEND_URL=http://127.0.0.1:3000
+JUDGE_SANDBOX=docker
+```
+
+容器内 judge profile 才使用：
+
+```text
+BACKEND_URL=http://app:3000
+JUDGE_SANDBOX=host
+```
+
+## 10. 备份与恢复
 
 备份：
 
@@ -221,12 +308,17 @@ tar -xzf liteoj-data-YYYY-MM-DD.tar.gz
 
 备份重点是 `data/`，其中包含数据库、测试点和附件。
 
-## 10. 安全建议
+## 11. 安全建议
 
 - 不要长期使用默认管理员密码。
 - 部署后确认响应头中包含 `X-Content-Type-Options: nosniff`，并且不再暴露 `X-Powered-By`。
 - 尽量使用 HTTPS。
 - 公网部署时限制后台访问或开启更强的服务器安全策略。
-- judge 默认 `host` 模式仍是轻量隔离；公开给陌生用户使用时建议在独立 judge 主机启用 `JUDGE_SANDBOX=docker`，或接入 isolate/nsjail/gVisor/Firecracker。
+- 同机部署时不要把 Docker socket 挂给 Web 容器。
+- 推荐使用 `./liteoj.sh start` 的“Web 容器 + 宿主机 judge + Docker 沙箱”结构。
+- 容器内 `host` judge 只用于本地和可信内网，不要用于陌生公网用户。
+- 更高安全等级仍建议把 judge 拆到独立主机/VM，并评估 isolate、nsjail、gVisor 或 Firecracker。
 - 不建议让 Web 服务和 judge 共享同一高权限用户；judge 不需要挂载 `data/`，只通过 API 领取测试数据。
+- 保留登录/注册限速；如反向代理后面还有 WAF 或限流，可以配合调大 `LOGIN_RATE_LIMIT` 和 `REGISTER_RATE_LIMIT`。
+- 测试数据上传同时限制压缩包大小和解压后总大小，避免 zip bomb。
 - 定期备份数据。

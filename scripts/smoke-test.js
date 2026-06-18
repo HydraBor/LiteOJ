@@ -188,10 +188,22 @@ assert(serverJs.includes("app.disable('x-powered-by')") && serverJs.includes('se
 assert(serverJs.includes("res.setHeader('Cache-Control', 'no-cache')"), 'SPA fallback should set a Cache-Control header');
 const authJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'auth.js'), 'utf8');
 const authRoutesJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'auth.js'), 'utf8');
+assert(securityJs.includes('function createRateLimit') && securityJs.includes('Retry-After'), 'security helper should expose lightweight API rate limiting');
 assert(authRoutesJs.includes('hashPassword(password)') && authRoutesJs.includes('verifyPassword(password, row.password_hash)') && !authRoutesJs.includes('bcrypt.compareSync'), 'auth routes should use centralized bcrypt password helpers');
+assert(authRoutesJs.includes('LOGIN_RATE_LIMIT') && authRoutesJs.includes('REGISTER_RATE_LIMIT'), 'auth routes should rate-limit login and registration');
+assert(authRoutesJs.includes("process.env.NODE_ENV !== 'production'"), 'production registration should not let the first public registrant become admin');
 assert(authJs.includes('SELECT id, username, role FROM users WHERE id = ?'), 'auth should validate token user still exists before using foreign-keyed user_id');
+assert(authJs.includes('JWT_SECRET must be set to a strong random value in production'), 'production should reject missing or weak JWT_SECRET');
 assert(authJs.includes('clearAuthCookie(req, res)'), 'stale login cookie should be cleared with request-aware cookie attributes');
 assert(authJs.includes("res.cookie(COOKIE_NAME, 'deleted'") && authJs.includes('httpOnly: true') && authJs.includes('if (cookieSecure(req)) options.secure = true'), 'auth cookie clearing should use valid request-aware HttpOnly/Secure attributes');
+const judgeRouteJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'judge.js'), 'utf8');
+assert(judgeRouteJs.includes('JUDGE_TOKEN must be set to a strong random value in production'), 'production should reject missing or weak JUDGE_TOKEN');
+const composeYaml = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.yml'), 'utf8');
+assert(composeYaml.includes('profiles:') && composeYaml.includes('container-judge'), 'container judge should be behind an explicit compose profile');
+assert(composeYaml.includes('JWT_SECRET:?') && composeYaml.includes('JUDGE_TOKEN:?') && composeYaml.includes('ADMIN_PASSWORD:?'), 'compose should require production secrets');
+const oneClickScript = fs.readFileSync(path.join(__dirname, '..', 'liteoj.sh'), 'utf8');
+assert(oneClickScript.includes('JUDGE_SANDBOX=docker') && oneClickScript.includes('compose up -d --build app'), 'one-click script should use host judge with Docker sandbox and only start the app service');
+assert(oneClickScript.includes('ADMIN_PASSWORD=$(random_secret)'), 'one-click script should generate a random initial admin password');
 
 const seedProblemJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'seed', 'problems', 'P1001', 'problem.json'), 'utf8'));
 assert(!seedProblemJson.description.includes('数学公式示例') && !seedProblemJson.description.includes('a^2+b^2'), 'seed A+B problem should not include unrelated math formula examples');
@@ -199,8 +211,10 @@ assert(seedProblemJson.description.includes('$a$') && seedProblemJson.descriptio
 assert.deepStrictEqual(seedProblemJson.tags, ['模拟'], 'seed A+B problem should only keep the 模拟 tag');
 const initJs = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'init.js'), 'utf8');
 assert(initJs.includes('shouldRefreshSample') && initJs.includes('数学公式示例') && initJs.includes("raw.id === 'P1001'") && initJs.includes("JSON.stringify(['模拟'])"), 'init should refresh stored P1001 statement/tags when rerun');
+assert(initJs.includes('ADMIN_PASSWORD must be set to a strong initial password in production'), 'production initialization should reject default admin password');
 
 const routes = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'problems.js'), 'utf8');
+assert(routes.includes('TESTDATA_UNZIPPED_LIMIT') && routes.includes('测试数据解压后总大小不能超过'), 'zip upload should limit total uncompressed testdata size');
 assert(routes.includes("['publish', 'public', 'show']") && routes.includes("['hide', 'hidden']"), 'problem batch visibility actions should accept configured action aliases');
 assert(routes.includes('copyAttachmentsAndRewriteDescription'), 'clone should copy and rewrite attachment URLs');
 for (const route of ["router.patch('/:id/status'", "router.post('/:id/status'", "router.post('/:id/clone'", "router.post('/:id/attachments'", "router.get('/:id/attachments/:filename'", "router.delete('/:id'", "router.get('/:id/cases'", "router.post('/:id/cases'", "router.post('/:id/cases/zip'", "router.delete('/:id/cases/:caseId'", "router.post('/:id/rejudge'", "router.post('/:id/submit'"]) {

@@ -2,6 +2,9 @@ const jwt = require('jsonwebtoken');
 const { db } = require('./db');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || JWT_SECRET === 'dev-secret-change-me' || JWT_SECRET.length < 32)) {
+  throw new Error('JWT_SECRET must be set to a strong random value in production');
+}
 const COOKIE_NAME = 'liteoj_token';
 
 function isTruthy(value) {

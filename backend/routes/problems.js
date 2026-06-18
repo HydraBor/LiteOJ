@@ -16,6 +16,7 @@ const {
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Number(process.env.TESTDATA_ZIP_LIMIT || 50) * 1024 * 1024 } });
 const attachmentUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Number(process.env.ATTACHMENT_IMAGE_LIMIT || 5) * 1024 * 1024 } });
+const TESTDATA_UNZIPPED_LIMIT_BYTES = Number(process.env.TESTDATA_UNZIPPED_LIMIT || 200) * 1024 * 1024;
 const SCORING_MODES = new Set(['oi', 'acm']);
 const CHECKER_MODES = new Set(['standard', 'ignore_space', 'case_insensitive', 'float']);
 
@@ -421,12 +422,17 @@ router.post('/:id/cases/zip', requireAdmin, upload.single('file'), (req, res, ne
     const zip = new AdmZip(req.file.buffer);
     const files = new Map();
     const ignored = [];
+    let totalUnzippedBytes = 0;
     for (const entry of zip.getEntries()) {
       if (entry.isDirectory) continue;
       const rawName = String(entry.entryName || '').replace(/\\/g, '/');
       if (!rawName || rawName.includes('__MACOSX') || rawName.startsWith('.')) continue;
       const ext = path.extname(rawName).toLowerCase();
       if (!['.in', '.out', '.ans'].includes(ext)) { ignored.push(rawName); continue; }
+      totalUnzippedBytes += Number(entry.header?.size || 0);
+      if (totalUnzippedBytes > TESTDATA_UNZIPPED_LIMIT_BYTES) {
+        return res.status(413).json({ error: `测试数据解压后总大小不能超过 ${Math.round(TESTDATA_UNZIPPED_LIMIT_BYTES / 1024 / 1024)} MB` });
+      }
       const stem = rawName.slice(0, -ext.length).replace(/\\/g, '/');
       const parts = stem.split('/').filter(Boolean);
       const key = parts.join('/');

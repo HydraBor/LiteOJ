@@ -14,6 +14,20 @@ SQLite 数据库 + data 文件目录
 judge worker 独立轮询提交任务
 ```
 
+推荐同机公网部署时，运行边界是：
+
+```text
+Nginx/浏览器
+  ↓
+liteoj-app Docker 容器
+  ↓ 127.0.0.1/API
+宿主机 judge worker
+  ↓ docker run --network none
+一次性编译/运行沙箱容器
+```
+
+这种方式不把 Docker socket 暴露给 Web 容器；用户代码只进入一次性沙箱容器，不与 Web 服务或 judge worker 共享进程空间。
+
 主链路：
 
 ```text
@@ -189,7 +203,9 @@ host: timeout + ulimit + 独立工作目录
 docker: 每次编译/运行进入无网络、限内存、限进程、只读根文件系统的 Docker 容器
 ```
 
-`host` 适合本地、内网和小规模课程训练。公网开放时建议把 judge worker 放到独立主机或隔离 VM，启用 `JUDGE_SANDBOX=docker`，或替换为 isolate、nsjail、gVisor、Firecracker 等更强沙箱。
+`host` 适合本地、内网和小规模课程训练。公网同机部署时，推荐通过 `liteoj.sh` 让 Web 跑在 `app` 容器中、judge worker 跑在宿主机上，并启用 `JUDGE_SANDBOX=docker`。更高安全要求时仍建议把 judge worker 拆到独立主机或隔离 VM，或替换为 isolate、nsjail、gVisor、Firecracker 等更强沙箱。
+
+`docker-compose.yml` 中的 `judge` 服务放在 `container-judge` profile 下，仅作为本地或可信内网的简化部署方式，不作为公网陌生提交的推荐路径。
 
 评测结算支持：
 

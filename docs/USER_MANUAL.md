@@ -273,10 +273,23 @@ seed/prelim/2025-CSP-J1-solution.md
 npm run judge
 ```
 
-Docker 部署时查看：
+使用一键同机部署时查看：
 
 ```bash
-docker compose logs -f judge
+./liteoj.sh status
+tail -f logs/judge.log
+```
+
+如果只启动了 Web 容器，可以重新拉起宿主机 Docker 沙箱 judge：
+
+```bash
+./liteoj.sh restart
+```
+
+仅本地/可信内网使用容器内 judge profile 时查看：
+
+```bash
+docker compose --profile container-judge logs -f judge
 ```
 
 ### 5.2 C++ 提交 CE

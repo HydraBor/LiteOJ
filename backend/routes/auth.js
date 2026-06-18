@@ -2,8 +2,11 @@ const express = require('express');
 const { db } = require('../db');
 const { signUser, setAuthCookie, clearAuthCookie, requireLogin } = require('../auth');
 const { hashPassword, verifyPassword } = require('../passwords');
+const { createRateLimit } = require('../security');
 
 const router = express.Router();
+const loginLimit = createRateLimit({ name: 'auth-login', windowMs: 60_000, max: Number(process.env.LOGIN_RATE_LIMIT || 20) });
+const registerLimit = createRateLimit({ name: 'auth-register', windowMs: 60_000, max: Number(process.env.REGISTER_RATE_LIMIT || 10) });
 
 function publicUser(row) {
   if (!row) return null;
@@ -16,7 +19,7 @@ router.get('/me', (req, res) => {
   res.json({ user: publicUser(row) });
 });
 
-router.post('/register', (req, res) => {
+router.post('/register', registerLimit, (req, res) => {
   const username = String(req.body.username || '').trim();
   const password = String(req.body.password || '');
   if (!/^[a-zA-Z0-9_]{3,24}$/.test(username)) {
@@ -25,7 +28,7 @@ router.post('/register', (req, res) => {
   if (password.length < 6) return res.status(400).json({ error: '密码长度至少 6 位' });
 
   const count = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
-  const role = count === 0 ? 'admin' : 'user';
+  const role = count === 0 && process.env.NODE_ENV !== 'production' ? 'admin' : 'user';
   const passwordHash = hashPassword(password);
 
   try {
@@ -41,7 +44,7 @@ router.post('/register', (req, res) => {
   }
 });
 
-router.post('/login', (req, res) => {
+router.post('/login', loginLimit, (req, res) => {
   const username = String(req.body.username || '').trim();
   const password = String(req.body.password || '');
   const row = db.prepare('SELECT * FROM users WHERE username = ?').get(username);

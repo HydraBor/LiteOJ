@@ -1,4 +1,5 @@
 const { judgeTask } = require('./runner');
+const { SANDBOX_MODE } = require('./sandbox');
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://127.0.0.1:3000';
 const JUDGE_TOKEN = process.env.JUDGE_TOKEN || 'dev-judge-token';
@@ -29,7 +30,7 @@ async function once() {
 }
 
 async function main() {
-  console.log(`[${JUDGE_ID}] LiteOJ judge worker started. Backend=${BACKEND_URL}`);
+  console.log(`[${JUDGE_ID}] LiteOJ judge worker started. Backend=${BACKEND_URL}, sandbox=${SANDBOX_MODE}`);
   while (true) {
     try {
       const worked = await once();

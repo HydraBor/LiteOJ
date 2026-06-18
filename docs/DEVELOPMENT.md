@@ -35,6 +35,8 @@ npm run init
 admin / admin123
 ```
 
+该默认密码只用于本地开发和测试。`NODE_ENV=production` 下首次初始化必须提供强 `ADMIN_PASSWORD`，否则初始化会失败。
+
 可用环境变量覆盖：
 
 ```bash
@@ -80,6 +82,14 @@ POST /api/judge/:id/result
 
 并使用 `JUDGE_TOKEN` 鉴权。
 
+公网同机部署不要直接使用默认 `host` 模式。推荐使用根目录脚本：
+
+```bash
+./liteoj.sh start
+```
+
+脚本会启动 Web 容器，并在宿主机以 `JUDGE_SANDBOX=docker` 启动 judge worker。这样用户代码会进入无网络 Docker 沙箱，而不会和 Web 容器或 judge worker 共享同一进程空间。
+
 ## 3. 目录说明
 
 ```text
@@ -113,6 +123,8 @@ admin
 ```
 
 鉴权方式：JWT 写入 `liteoj_token` Cookie。
+
+注册接口在非生产环境会保留“第一个注册用户成为 admin”的开发便利；`NODE_ENV=production` 下注册用户始终是普通 `user`，管理员必须由初始化脚本根据 `ADMIN_USERNAME/ADMIN_PASSWORD` 创建。
 
 Cookie 规则：
 
@@ -156,6 +168,16 @@ ABC2 < ABC10 < B1 < P1 < P10
 
 题面只保留一个 Markdown 字段 `description`，输入格式、输出格式、样例、提示和数据范围都写在这个字段中。
 
+编程题评测配置：
+
+```text
+scoringMode: oi / acm
+checkerMode: standard / ignore_space / case_insensitive / float
+checkerTolerance: 浮点比较误差，默认 1e-6
+```
+
+`oi` 表示按测试点或子任务累计分数；`acm` 表示全部测试点通过才获得本题全部分数。
+
 ### 4.3 测试点管理
 
 测试点记录在 `problem_cases` 表中，实际文件存储在：
@@ -178,6 +200,8 @@ POST /api/problems/:id/cases/zip
 subtask/1.in + subtask/1.out
 ```
 
+zip 中的目录名会写入 `problem_cases.subtask`。同一 `subtask` 下只要有测试点失败，该子任务内所有测试点均不得分；没有子任务名的测试点按单点计分。
+
 后台删除测试点调用：
 
 ```text
@@ -197,7 +221,7 @@ submissions 表写入 Waiting
 ↓
 judge worker 轮询 /api/judge/acquire
 ↓
-编译、运行、逐测试点比较
+编译、运行、逐测试点比较，按 OI/ACM/子任务规则结算
 ↓
 POST /api/judge/:id/result
 ↓
@@ -218,7 +242,22 @@ PA
 SE
 ```
 
-当前 judge 为教学级轻量隔离：`timeout + ulimit + 临时目录`。
+judge 支持两种运行模式：
+
+```text
+JUDGE_SANDBOX=host    # 代码默认值，本地 timeout + ulimit + 临时目录
+JUDGE_SANDBOX=docker  # 每次编译/运行进入无网络 Docker 容器
+```
+
+`docker` 模式会使用 `JUDGE_SANDBOX_IMAGE`，默认 `liteoj:latest`。公网同机部署时，推荐 Web 使用 Docker Compose `app` 服务，judge worker 在宿主机运行，并通过 Docker CLI 创建一次性沙箱容器。不要把 Docker socket 挂给 Web 容器。
+
+`docker-compose.yml` 中的 `judge` 服务放在 `container-judge` profile 下，主要用于本地和可信内网教学：
+
+```bash
+docker compose --profile container-judge up -d --build
+```
+
+它不是陌生公网提交的推荐路径。
 
 ### 4.5 初赛题库
 
@@ -307,6 +346,10 @@ GET /api/analytics/prelim/knowledge?years=2025,2024&groupName=CSP-J
 账号密码相关逻辑集中在 `backend/passwords.js`，注册、登录和个人主页改密均通过统一的 bcrypt 哈希与校验函数处理。`backend/routes/profile.js` 负责登录用户的个人主页改密接口，避免把账号设置逻辑散落到其他业务模块中。
 
 HTTP 安全响应头集中在 `backend/security.js`，由 `backend/server.js` 在所有路由前统一挂载。API 默认使用 `no-store` 缓存策略，静态资源使用短时缓存，SPA 入口使用 `no-cache`。
+
+`backend/security.js` 还提供轻量内存限速器。登录和注册接口分别使用 `LOGIN_RATE_LIMIT`、`REGISTER_RATE_LIMIT` 控制单 IP 窗口内请求数，防止最基础的撞库和注册刷量。
+
+测试数据 zip 上传除了 `TESTDATA_ZIP_LIMIT` 压缩包大小限制，还会用 `TESTDATA_UNZIPPED_LIMIT` 限制解压后总大小，降低 zip bomb 风险。
 
 ## 5. API 概览
 
@@ -476,7 +519,7 @@ npm run real-smoke
 npm test
 ```
 
-`real-smoke` 会创建临时数据目录和端口，测试登录、新增题、编辑题、测试点、zip 上传、复制、隐藏/公开、删除、提交、初赛题库和模考接口。
+`real-smoke` 会创建临时数据目录和端口，测试登录、新增题、编辑题、评分/checker 配置、测试点子任务、zip 上传、复制、隐藏/公开、删除、提交、初赛题库和模考接口。
 
 ## 9. 后续开发建议
 
@@ -486,4 +529,4 @@ npm test
 - 前端路由不要混用整页跳转和 SPA 跳转。
 - 后台按钮统一使用 `data-route` 或 `data-action`。
 - 任何新增接口都应进入 smoke-test。
-- judge 安全性是后续正式公网部署的重点。
+- judge 安全性是正式公网部署的重点；同机部署使用宿主机 judge + Docker 沙箱作为基础防线，独立 VM/主机仍然是更强方案。

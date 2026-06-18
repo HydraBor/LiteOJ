@@ -72,7 +72,21 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospac
 .badge.warn { color: var(--warn); border-color: #ead59d; background: #fff8e5; }
 .error { color: var(--danger); background: #fff1f1; border: 1px solid #ffd0d0; padding: 10px; border-radius: 8px; margin: 10px 0; }
 .success { color: #136f34; background: #effaf2; border: 1px solid #ccebd5; padding: 10px; border-radius: 8px; }
-.problem-title { font-size: 28px; margin: 0 0 8px; }
+.problem-head { align-items: flex-start; gap: 16px; margin-bottom: 6px; }
+.problem-heading { min-width: 0; }
+.problem-title { font-size: 28px; margin: 0 0 7px; line-height: 1.25; }
+.problem-meta { margin: 0; line-height: 1.65; }
+.problem-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 18px; }
+.problem-tags:empty { display: none; }
+.problem-tag { display: inline-flex; align-items: center; min-height: 26px; padding: 4px 11px; border: 1px solid #d7e2f5; border-radius: 999px; background: var(--accent-soft); color: #1f56bd; font-size: 13px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+.problem-tag.warn { color: var(--warn); border-color: #ead59d; background: #fff8e5; }
+.problem-statement { margin-top: 0; }
+.problem-statement .code-block { margin: 8px 0 16px; border-radius: 10px; background: #f8fafc; border-color: #dfe5ef; }
+.problem-statement .code-block pre { background: #f8fafc; color: #242b3a; padding: 12px 14px; }
+.problem-statement .code-lang { height: 28px; background: #eef3fb; color: #5a6475; border-bottom: 1px solid #dfe5ef; font-size: 12px; text-transform: none; letter-spacing: 0; }
+.problem-statement .tok-keyword { color: #1d4ed8; }
+.problem-statement .tok-string { color: #047857; }
+.problem-statement .tok-comment { color: #64748b; }
 .markdown { line-height: 1.7; white-space: normal; }
 .markdown p { margin: 0 0 12px; }
 .markdown h2, .markdown h3, .markdown h4, .markdown h5 { margin: 20px 0 10px; }
@@ -149,6 +163,7 @@ body.auth-page .container { max-width: 520px; margin-top: 56px; }
   .container { margin-top: 14px; }
   .grid.two, .grid.three, .grid.four, .zip-form { grid-template-columns: 1fr; }
   .problemset-head, .manage-layout-head { align-items: flex-start; flex-direction: column; }
+  .problem-head { align-items: flex-start; }
   .filter-panel-grid, .manage-filter-grid { grid-template-columns: 1fr 1fr; }
   .filter-panel-grid .reset-btn, .filter-panel-grid button.primary { grid-column: auto; }
   .auth-main.simple-auth-card { width: min(94vw, 420px); padding: 34px 28px; }
@@ -161,6 +176,9 @@ body.auth-page .container { max-width: 520px; margin-top: 56px; }
   .main-nav { order: 3; width: 100%; height: 42px; overflow-x: auto; }
   .auth-actions { margin-left: auto; }
   .filter-panel-grid, .manage-filter-grid { grid-template-columns: 1fr; }
+  .problem-title { font-size: 24px; }
+  .problem-tags { margin-bottom: 14px; }
+  .problem-tag { min-height: 24px; padding: 3px 9px; font-size: 12px; }
 }
 
 /* Programming problem editor and import form */

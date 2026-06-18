@@ -75,7 +75,20 @@ http://localhost:3000
 admin / admin123
 ```
 
-### 推荐同机部署
+### 一键 Docker 运行
+
+推荐在云服务器上使用脚本启动：
+
+```bash
+chmod +x ./liteoj.sh ./litoj.sh
+./liteoj.sh start
+```
+
+如果你误输入了 `./litoj.sh start` 也可以，`litoj.sh` 会自动转到 `liteoj.sh`。
+
+脚本会检查 Docker/Compose，缺失时自动安装；同时会配置 Docker 国内 registry mirror，并在构建前预拉取 `node:22-bookworm-slim`，避免 Docker Hub 直连超时。
+
+### Docker Compose 手动运行
 
 ```bash
 chmod +x ./liteoj.sh

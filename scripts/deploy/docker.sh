@@ -158,6 +158,24 @@ prepare_base_image() {
   die "Cannot pull node:22-bookworm-slim. Check server network or configure a reachable Docker mirror."
 }
 
+prepare_go_judge_base_image() {
+  local image="${GO_JUDGE_BASE_IMAGE:-criyle/go-judge:latest}"
+  log "Preparing go-judge base image $image"
+  if "${DOCKER[@]}" pull "$image"; then
+    return 0
+  fi
+  warn "Pull through Docker Hub failed; trying direct mirror images for go-judge."
+  if [ "$image" = "criyle/go-judge:latest" ]; then
+    for mirror in docker.1ms.run docker.m.daocloud.io; do
+      if "${DOCKER[@]}" pull "${mirror}/criyle/go-judge:latest"; then
+        "${DOCKER[@]}" tag "${mirror}/criyle/go-judge:latest" "$image"
+        return 0
+      fi
+    done
+  fi
+  die "Cannot pull $image. Check server network or configure GO_JUDGE_BASE_IMAGE to a reachable mirror image."
+}
+
 ensure_docker() {
   install_docker_if_needed
   ensure_docker_group

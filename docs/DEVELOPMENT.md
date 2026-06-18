@@ -88,7 +88,7 @@ POST /api/judge/:id/result
 ./start.sh
 ```
 
-脚本会启动 Web 容器，并在宿主机以 `JUDGE_SANDBOX=docker` 启动 judge worker。这样用户代码会进入无网络 Docker 沙箱，而不会和 Web 容器或 judge worker 共享同一进程空间。
+脚本会启动 Web 容器和 go-judge 容器，并在宿主机以 `JUDGE_EXECUTOR=go-judge` 启动 judge worker。这样用户代码会由 go-judge 受限执行环境处理，而不会和 Web 容器或 judge worker 共享同一进程空间。
 
 ## 3. 目录说明
 
@@ -242,14 +242,21 @@ PA
 SE
 ```
 
-judge 支持两种运行模式：
+judge worker 支持两种执行器：
 
 ```text
-JUDGE_SANDBOX=host    # 代码默认值，本地 timeout + ulimit + 临时目录
+JUDGE_EXECUTOR=go-judge # 生产推荐，调用 go-judge REST API
+JUDGE_EXECUTOR=local    # 开发 fallback，继续使用 JUDGE_SANDBOX
+```
+
+`local` 执行器下仍有两种 legacy 沙箱：
+
+```text
+JUDGE_SANDBOX=host    # 本地 timeout + ulimit + 临时目录
 JUDGE_SANDBOX=docker  # 每次编译/运行进入无网络 Docker 容器
 ```
 
-`docker` 模式会使用 `JUDGE_SANDBOX_IMAGE`，默认 `liteoj:latest`。公网同机部署时，推荐 Web 使用 Docker Compose `app` 服务，judge worker 在宿主机运行，并通过 Docker CLI 创建一次性沙箱容器。不要把 Docker socket 挂给 Web 容器。
+公网同机部署时，推荐 Web 使用 Docker Compose `app` 服务，go-judge 使用 `go-judge` 服务，judge worker 在宿主机运行并通过 `GO_JUDGE_URL` 调用 `/run`。不要把 Docker socket 挂给 Web 容器。
 
 `docker-compose.yml` 中的 `judge` 服务放在 `container-judge` profile 下，主要用于本地和可信内网教学：
 
@@ -529,4 +536,4 @@ npm test
 - 前端路由不要混用整页跳转和 SPA 跳转。
 - 后台按钮统一使用 `data-route` 或 `data-action`。
 - 任何新增接口都应进入 smoke-test。
-- judge 安全性是正式公网部署的重点；同机部署使用宿主机 judge + Docker 沙箱作为基础防线，独立 VM/主机仍然是更强方案。
+- judge 安全性是正式公网部署的重点；同机部署使用宿主机 judge worker + go-judge 作为基础防线，独立 VM/主机仍然是更强方案。

@@ -22,11 +22,13 @@ Nginx/浏览器
 liteoj-app Docker 容器
   ↓ 127.0.0.1/API
 宿主机 judge worker
-  ↓ docker run --network none
-一次性编译/运行沙箱容器
+  ↓ 127.0.0.1:5050 /run
+liteoj-go-judge Docker 特权容器
+  ↓ go-judge 受限执行环境
+用户代码编译/运行
 ```
 
-这种方式不把 Docker socket 暴露给 Web 容器；用户代码只进入一次性沙箱容器，不与 Web 服务或 judge worker 共享进程空间。
+这种方式不把 Docker socket 暴露给 Web 容器；judge worker 只负责领取任务、调用 go-judge、比较输出和回写结果，用户代码不与 Web 服务或 judge worker 共享进程空间。
 
 主链路：
 
@@ -196,16 +198,16 @@ POST /api/problems/:id/cases/zip
 
 ## 7. Judge 设计
 
-当前 judge 支持两种模式：
+当前 judge 有两层：
 
 ```text
-host: timeout + ulimit + 独立工作目录
-docker: 每次编译/运行进入无网络、限内存、限进程、只读根文件系统的 Docker 容器
+JUDGE_EXECUTOR=go-judge: 生产推荐，worker 通过 REST 调用 go-judge /run
+JUDGE_EXECUTOR=local: 开发 fallback，继续使用 JUDGE_SANDBOX=host/docker
 ```
 
-`host` 适合本地、内网和小规模课程训练。公网同机部署时，推荐通过 `start.sh` 让 Web 跑在 `app` 容器中、judge worker 跑在宿主机上，并启用 `JUDGE_SANDBOX=docker`。更高安全要求时仍建议把 judge worker 拆到独立主机或隔离 VM，或替换为 isolate、nsjail、gVisor、Firecracker 等更强沙箱。
+`go-judge` 模式保留 LiteOJ 的任务领取、评分和 checker 逻辑，只替换底层编译/运行执行器。公网同机部署时，`start.sh` 会让 Web 跑在 `app` 容器中、go-judge 跑在只绑定 `127.0.0.1` 的 `liteoj-go-judge` 容器中，judge worker 跑在宿主机上。更高安全要求时仍建议把 judge worker 或 go-judge 拆到独立主机/隔离 VM，并结合整体网络边界评估。
 
-`docker-compose.yml` 中的 `judge` 服务放在 `container-judge` profile 下，仅作为本地或可信内网的简化部署方式，不作为公网陌生提交的推荐路径。
+`docker-compose.yml` 中的 `judge` 服务放在 `container-judge` profile 下，启用时同样默认调用 Compose 内的 go-judge 服务；该 profile 仅作为本地或可信内网的简化部署方式，不作为公网陌生提交的首选路径。
 
 评测结算支持：
 

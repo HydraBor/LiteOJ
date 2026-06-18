@@ -280,7 +280,7 @@ npm run judge
 tail -f logs/judge.log
 ```
 
-如果只启动了 Web 容器，可以重新拉起宿主机 Docker 沙箱 judge：
+如果只启动了 Web 容器，可以重新使用一键脚本拉起 go-judge 和宿主机 judge worker：
 
 ```bash
 ./start.sh restart

@@ -8,7 +8,7 @@ const {
 } = require('../backend/problem-utils');
 const { parsePaperQuestions, normalizeGroupName } = require('../backend/prelim-utils');
 const { compareOutput } = require('../judge/checker');
-const { applyScoring } = require('../judge/runner');
+const { applyScoring, normalizeExecutorMode } = require('../judge/runner');
 
 function ids(list) { return list.map((x) => x.id); }
 
@@ -68,6 +68,9 @@ const acmScore = applyScoring([
   { caseId: 2, status: 'Wrong Answer', rawScore: 50, score: 0 },
 ], 'acm');
 assert.strictEqual(acmScore.score, 0, 'ACM scoring should be all-or-nothing');
+assert.strictEqual(normalizeExecutorMode('gojudge'), 'go-judge', 'gojudge executor alias should normalize');
+assert.strictEqual(normalizeExecutorMode('go-judge'), 'go-judge', 'go-judge executor should normalize');
+assert.strictEqual(normalizeExecutorMode('docker'), 'local', 'legacy sandbox names should stay under local executor');
 
 const paperMd = fs.readFileSync(path.join(__dirname, '..', 'seed', 'prelim', '2025-CSP-J1.md'), 'utf8');
 const solutionMd = fs.readFileSync(path.join(__dirname, '..', 'seed', 'prelim', '2025-CSP-J1-solution.md'), 'utf8');
@@ -179,6 +182,7 @@ assert(!logoMark.includes('lightning') && !logoMark.includes('bolt'), 'selected 
 for (const endpoint of ["'/status'", "'/clone'", "'/rejudge'", "'/cases/zip'", "'/attachments'"]) {
   assert(appJs.includes(endpoint), `frontend does not reference ${endpoint}`);
 }
+assert(appJs.includes("problemApi(problemId, '/cases')") && appJs.includes('renderCaseOverview') && appJs.includes('openCaseEditor'), 'testdata manager should render a lightweight grouped overview and lazy-load single case editors');
 
 const prelimRoutes = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'prelim.js'), 'utf8');
 for (const route of ["router.get('/items'", "router.get('/items/:id'", "router.post('/questions/:id/check'", "router.post('/import-md'", "router.get('/facets'", "router.get('/mock/papers'", "router.post('/mock/start'", "router.post('/mock/exams/:id/submit'", 'scoreTotalForMock', 'clampScoreToTotal']) {
@@ -206,19 +210,23 @@ const composeYaml = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.y
 assert(composeYaml.includes('profiles:') && composeYaml.includes('container-judge'), 'container judge should be behind an explicit compose profile');
 assert(composeYaml.includes('JWT_SECRET:?') && composeYaml.includes('JUDGE_TOKEN:?') && composeYaml.includes('ADMIN_PASSWORD:?'), 'compose should require production secrets');
 assert(composeYaml.includes('network: ${DOCKER_BUILD_NETWORK:-host}'), 'docker build should use host network by default for domestic cloud/router environments');
+assert(composeYaml.includes('go-judge:') && composeYaml.includes('Dockerfile.go-judge') && composeYaml.includes('127.0.0.1:${GO_JUDGE_PORT:-5050}:5050'), 'compose should include a loopback-bound go-judge service');
 const dockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8');
 assert(dockerfile.includes('fetch-retries 5') && dockerfile.includes('registry.npmjs.org') && dockerfile.includes('npm ci --omit=dev'), 'Dockerfile npm install should use retries and fallback registries');
+const goJudgeDockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile.go-judge'), 'utf8');
+assert(goJudgeDockerfile.includes('criyle/go-judge') && goJudgeDockerfile.includes('gcc g++') && goJudgeDockerfile.includes('-http-addr'), 'go-judge Dockerfile should derive from official go-judge and install language toolchains');
 const oneClickScript = fs.readFileSync(path.join(__dirname, '..', 'start.sh'), 'utf8');
 const deployEnvScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy', 'env.sh'), 'utf8');
 const deployServiceScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy', 'services.sh'), 'utf8');
 const deployDockerScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy', 'docker.sh'), 'utf8');
 assert(oneClickScript.includes('scripts/deploy/services.sh'), 'start.sh should source modular deployment scripts');
-assert(deployServiceScript.includes('JUDGE_SANDBOX=docker') && deployServiceScript.includes('compose up -d --build app'), 'one-click script should use host judge with Docker sandbox and only start the app service');
+assert(deployServiceScript.includes('JUDGE_EXECUTOR') && deployServiceScript.includes('GO_JUDGE_URL') && deployServiceScript.includes('compose up -d --build app go-judge'), 'one-click script should start web plus go-judge and point the host judge worker at go-judge');
 assert(deployServiceScript.includes('ensure_web_port_available') && deployServiceScript.includes('LITEOJ_AUTO_PORT'), 'start script should auto-select a free web port when the default port is occupied');
+assert(deployServiceScript.includes('ensure_go_judge_port_available') && deployServiceScript.includes('LITEOJ_GO_JUDGE_PORT_SCAN_END'), 'start script should auto-select a free go-judge port when 5050 is occupied');
 assert(deployServiceScript.includes('/dev/tcp/127.0.0.1/$port'), 'port detection should also probe loopback so WSL/Docker Desktop notices Windows-side listeners');
 assert(deployEnvScript.includes('ADMIN_PASSWORD=$(random_secret)'), 'one-click script should generate a random initial admin password');
-assert(deployServiceScript.includes('start_judge()') && deployServiceScript.includes('sg docker') && deployServiceScript.includes('judge/worker.js'), 'one-click script should start a host judge worker that can access Docker');
-assert(deployDockerScript.includes('mirrors.tuna.tsinghua.edu.cn/docker-ce') && deployDockerScript.includes('docker.1ms.run'), 'deployment should prefer domestic Docker apt and registry mirrors');
+assert(deployServiceScript.includes('start_judge()') && deployServiceScript.includes('judge/worker.js'), 'one-click script should start a host judge worker');
+assert(deployDockerScript.includes('mirrors.tuna.tsinghua.edu.cn/docker-ce') && deployDockerScript.includes('docker.1ms.run') && deployDockerScript.includes('prepare_go_judge_base_image'), 'deployment should prefer domestic Docker apt/registry mirrors and pre-pull go-judge');
 
 const seedProblemJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'seed', 'problems', 'P1001', 'problem.json'), 'utf8'));
 assert(!seedProblemJson.description.includes('数学公式示例') && !seedProblemJson.description.includes('a^2+b^2'), 'seed A+B problem should not include unrelated math formula examples');
@@ -232,7 +240,7 @@ const routes = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', '
 assert(routes.includes('TESTDATA_UNZIPPED_LIMIT') && routes.includes('测试数据解压后总大小不能超过'), 'zip upload should limit total uncompressed testdata size');
 assert(routes.includes("['publish', 'public', 'show']") && routes.includes("['hide', 'hidden']"), 'problem batch visibility actions should accept configured action aliases');
 assert(routes.includes('copyAttachmentsAndRewriteDescription'), 'clone should copy and rewrite attachment URLs');
-for (const route of ["router.patch('/:id/status'", "router.post('/:id/status'", "router.post('/:id/clone'", "router.post('/:id/attachments'", "router.get('/:id/attachments/:filename'", "router.delete('/:id'", "router.get('/:id/cases'", "router.post('/:id/cases'", "router.post('/:id/cases/zip'", "router.delete('/:id/cases/:caseId'", "router.post('/:id/rejudge'", "router.post('/:id/submit'"]) {
+for (const route of ["router.patch('/:id/status'", "router.post('/:id/status'", "router.post('/:id/clone'", "router.post('/:id/attachments'", "router.get('/:id/attachments/:filename'", "router.delete('/:id'", "router.get('/:id/cases'", "router.get('/:id/cases/:caseId'", "router.post('/:id/cases'", "router.post('/:id/cases/zip'", "router.delete('/:id/cases/:caseId'", "router.post('/:id/rejudge'", "router.post('/:id/submit'"]) {
   assert(routes.includes(route), `missing backend route ${route}`);
 }
 assert(appJs.includes('raw.replace(/\\\\\\\((.+?)\\\\\\\)/g') || appJs.includes('raw.replace(/\\\\\((.+?)\\\\\)/g'), 'inline markdown should support \\(...\\) KaTeX math');

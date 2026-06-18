@@ -1,0 +1,29 @@
+ARG GO_JUDGE_BASE_IMAGE=criyle/go-judge:latest
+FROM ${GO_JUDGE_BASE_IMAGE} AS gojudge
+
+FROM debian:bookworm-slim
+
+WORKDIR /opt
+
+ARG APT_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian
+ARG APT_SECURITY_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian-security
+
+RUN APT_BOOTSTRAP_MIRROR="$(printf '%s' "$APT_MIRROR" | sed 's#^https://#http://#')" \
+  && APT_BOOTSTRAP_SECURITY_MIRROR="$(printf '%s' "$APT_SECURITY_MIRROR" | sed 's#^https://#http://#')" \
+  && if [ -n "$APT_BOOTSTRAP_MIRROR" ] && [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i \
+        -e "s#http://deb.debian.org/debian#${APT_BOOTSTRAP_MIRROR}#g" \
+        -e "s#https://deb.debian.org/debian#${APT_BOOTSTRAP_MIRROR}#g" \
+        -e "s#http://security.debian.org/debian-security#${APT_BOOTSTRAP_SECURITY_MIRROR}#g" \
+        -e "s#https://security.debian.org/debian-security#${APT_BOOTSTRAP_SECURITY_MIRROR}#g" \
+        /etc/apt/sources.list.d/debian.sources; \
+    fi \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl python3 gcc g++ make tini \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=gojudge /opt/go-judge /opt/mount.yaml /opt/
+
+EXPOSE 5050/tcp 5051/tcp 5052/tcp
+ENTRYPOINT ["/usr/bin/tini", "--", "/opt/go-judge"]
+CMD ["-http-addr", "0.0.0.0:5050", "-mount-conf", "/opt/mount.yaml", "-release"]

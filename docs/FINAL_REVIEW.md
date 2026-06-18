@@ -1,6 +1,6 @@
 # LiteOJ 终版检查记录
 
-更新版本：`1.3.0`。本次完善编程题评测系统，新增 OI/ACM 评分方式、子任务分组、常用输出比较模式和可配置 Docker 沙箱；此前的个人主页改密、安全响应头、密码哈希封装和数据分析页面收尾继续保留。
+更新版本：`1.3.0`。本次完善编程题评测系统，新增 OI/ACM 评分方式、子任务分组、常用输出比较模式，并将生产评测执行器切换为 go-judge；此前的个人主页改密、安全响应头、密码哈希封装和数据分析页面收尾继续保留。
 
 本记录用于说明当前终版前完成的整理、清理和验证事项。
 
@@ -26,8 +26,8 @@
 - 评分方式支持 OI 按点累计和 ACM 全过得分；
 - 测试点支持子任务分组，zip 子目录会自动映射为子任务；
 - 输出比较支持标准比较、忽略空白、大小写不敏感和浮点误差；
-- judge worker 支持 `JUDGE_SANDBOX=host/docker`，Docker 模式为每次编译/运行创建无网络、限内存、限进程、只读根文件系统的容器。
-- 同机公网部署推荐 `./start.sh`：Web 使用 Docker Compose `app` 容器，judge worker 在宿主机运行，并强制使用 Docker 沙箱执行用户代码。
+- judge worker 支持 `JUDGE_EXECUTOR=go-judge/local`，生产默认通过 go-judge REST API 编译/运行用户代码。
+- 同机公网部署推荐 `./start.sh`：Web 使用 Docker Compose `app` 容器，go-judge 使用 `liteoj-go-judge` 容器，judge worker 在宿主机运行并调用 `127.0.0.1:5050`。
 
 ## 2. 已清理内容
 
@@ -110,9 +110,9 @@
 - 后台新增/编辑题目可以保存评分方式和输出比较配置；
 - 手动测试点和 zip 测试点都能保存子任务；
 - judge worker 会按 OI/ACM/子任务规则结算分数；
-- Docker Compose 默认只启动 Web `app` 服务；
-- 容器内 judge 被放入 `container-judge` profile，仅作为本地或可信内网教学的简化模式；
-- `start.sh` 会自动生成 `.env` 强随机密钥、检测 Docker/Node、启动 Web 容器和宿主机 Docker 沙箱 judge。
+- Docker Compose 默认可启动 Web `app` 和 `go-judge` 服务；
+- 容器内 judge 被放入 `container-judge` profile，仅作为本地或可信内网教学的简化模式，并默认调用 Compose 内 go-judge；
+- `start.sh` 会自动生成 `.env` 强随机密钥、检测 Docker/Node、启动 Web/go-judge 容器和宿主机 judge worker。
 
 ## 8. 安全收尾检查
 
@@ -124,7 +124,7 @@
 - 生产环境注册接口不会把第一个注册用户提升为 admin；
 - 登录和注册接口有基础 IP 限速；
 - 测试数据 zip 同时限制压缩包大小和解压后总大小；
-- 默认 Compose 不再启动容器内 judge，避免误把轻量 `host` judge 用作公网评测路径。
+- 默认 Compose 不再启动容器内 judge，避免误把 legacy `local/host` judge 用作公网评测路径；go-judge 端口默认只绑定 `127.0.0.1`。
 
 ## 9. 测试命令
 

@@ -656,6 +656,96 @@ function renderCaseTable(_problemId, cases) {
     <tr><td>${c.sort}</td><td>${c.subtask ? esc(c.subtask) : '<span class="muted">--</span>'}</td><td>${c.score}</td><td>${esc(c.inputPath)}</td><td>${esc(c.outputPath)}</td></tr>`).join('')}</tbody></table>`;
 }
 
+function caseFileName(value) {
+  return String(value || '').replace(/\\/g, '/').split('/').filter(Boolean).pop() || '--';
+}
+
+function caseEditorId(caseId) {
+  return `caseEditor-${String(caseId).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+}
+
+function groupCasesBySubtask(cases = []) {
+  const groups = [];
+  const map = new Map();
+  for (const c of cases) {
+    const key = c.subtask || '__single__';
+    if (!map.has(key)) {
+      const group = {
+        key,
+        title: c.subtask || '未分组测试点',
+        subtask: c.subtask || '',
+        cases: [],
+        score: 0,
+      };
+      map.set(key, group);
+      groups.push(group);
+    }
+    const group = map.get(key);
+    group.cases.push(c);
+    group.score += Number(c.score || 0);
+  }
+  return groups;
+}
+
+function renderCaseGroup(problemId, problem, group, index, hasSubtasks) {
+  const title = hasSubtasks ? `子任务 ${index + 1}` : group.title;
+  const inheritedLimits = `继承题目限制：${problem.timeLimit || 1000} ms / ${problem.memoryLimit || 128} MB`;
+  return `<section class="case-group-card" data-subtask="${esc(group.subtask)}">
+    <div class="case-group-head">
+      <div>
+        <h3>${esc(title)}${group.subtask ? `<span>${esc(group.subtask)}</span>` : ''}</h3>
+        <p class="muted">${group.cases.length} 个测试点 · ${inheritedLimits}</p>
+      </div>
+      <div class="case-group-score"><b>${esc(formatScore(group.score))}</b><span>分</span></div>
+    </div>
+    <div class="case-group-table-wrap">
+      <table class="case-group-table">
+        <thead><tr><th>#</th><th>输入文件</th><th>输出文件</th><th>分数</th><th>时间</th><th>内存</th><th>操作</th></tr></thead>
+        <tbody>${group.cases.map((c) => `<tr>
+          <td><span class="case-index">#${esc(c.sort)}</span></td>
+          <td><code>${esc(caseFileName(c.inputPath))}</code></td>
+          <td><code>${esc(caseFileName(c.outputPath))}</code></td>
+          <td>${esc(formatScore(c.score))}</td>
+          <td>${esc(problem.timeLimit || 1000)} ms</td>
+          <td>${esc(problem.memoryLimit || 128)} MB</td>
+          <td class="table-actions-cell case-row-actions">
+            <div class="table-action-row">
+              <button type="button" class="case-edit-btn" data-problem-id="${esc(problemId)}" data-case-id="${esc(c.id)}">编辑</button>
+              <button type="button" class="danger case-delete-btn" data-problem-id="${esc(problemId)}" data-case-id="${esc(c.id)}">删除</button>
+            </div>
+          </td>
+        </tr>
+        <tr class="case-editor-row"><td colspan="7"><div class="case-inline-editor" id="${esc(caseEditorId(c.id))}"></div></td></tr>`).join('')}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function renderCaseOverview(problemId, problem, cases = []) {
+  if (!cases.length) {
+    return `<div class="case-empty-state">
+      <h3>暂无测试点</h3>
+      <p class="muted">上传 zip 或手动新增测试点后，这里会按子任务分组展示文件、分数和继承的时空限制。</p>
+    </div>`;
+  }
+  const groups = groupCasesBySubtask(cases);
+  const hasSubtasks = cases.some((c) => c.subtask);
+  const totalScore = cases.reduce((sum, c) => sum + Number(c.score || 0), 0);
+  return `<div class="case-overview">
+    <div class="case-summary-strip">
+      <div><b>${cases.length}</b><span>测试点</span></div>
+      <div><b>${groups.length}</b><span>${hasSubtasks ? '子任务' : '分组'}</span></div>
+      <div><b>${formatScore(totalScore)}</b><span>总分</span></div>
+      <div><b>${hasSubtasks ? '开启' : '未开启'}</b><span>子任务模式</span></div>
+    </div>
+    <div class="case-mode-note">
+      <span class="state-pill ${hasSubtasks ? 'state-public' : 'state-none'}">${hasSubtasks ? '子任务整组得分' : '普通测试点'}</span>
+      <p class="muted">${hasSubtasks ? '同一子任务内任意测试点失败时，该子任务内通过的测试点也不会得分。' : '没有设置子任务名时，每个测试点独立计分。'}</p>
+    </div>
+    <div class="case-group-list">${groups.map((group, index) => renderCaseGroup(problemId, problem, group, index, hasSubtasks)).join('')}</div>
+  </div>`;
+}
+
 async function renderSubmissions() {
   setImmersive(false);
   const data = await api('/api/submissions');
@@ -1614,7 +1704,7 @@ async function renderCaseManager(problemId) {
   setImmersive(false);
   if (currentUser?.role !== 'admin') return renderLogin();
   const pdata = await api(problemApi(problemId));
-  const cdata = await api(problemApi(problemId, '/cases?content=1'));
+  const cdata = await api(problemApi(problemId, '/cases'));
   const cases = cdata.cases || [];
   app.innerHTML = `
     <div class="row space page-head">
@@ -1623,7 +1713,7 @@ async function renderCaseManager(problemId) {
     </div>
     <div class="card">
       <h2>zip 批量上传测试数据</h2>
-      <p class="muted">选择 zip 后会自动解压并识别同名的 <code>.in</code> 与 <code>.out/.ans</code> 文件，例如 <code>1.in</code> + <code>1.out</code>；目录名会作为子任务。</p>
+      <p class="muted">选择 zip 后会自动识别同名的 <code>.in</code> 与 <code>.out/.ans</code> 文件；zip 子目录会作为子任务名。导入后只展示测试点概要，编辑时再按需读取具体输入输出。</p>
       <form id="caseZipForm" class="zip-form">
         ${filePicker('file', 'caseZipFileName', '选择 zip 文件')}
         <label class="checkbox-line"><input type="checkbox" name="replace" checked /> 覆盖当前测试点</label>
@@ -1644,9 +1734,9 @@ async function renderCaseManager(problemId) {
       </form>
       <div id="caseMsg"></div>
     </div>
-    <div class="card table-card">
-      <h2>已有测试点</h2>
-      ${cases.length ? cases.map((c) => renderCaseEditorBlock(problemId, c)).join('') : '<p class="muted">暂无测试点。没有测试点时提交会无法正确评测。</p>'}
+    <div class="card table-card case-overview-card">
+      <div class="table-headline"><h2>已有测试点</h2><span class="muted small">点击单个测试点的“编辑”后才会加载输入输出内容</span></div>
+      ${renderCaseOverview(problemId, pdata.problem, cases)}
     </div>`;
   bindFileNameDisplays(qs('#caseZipForm'));
   qs('#caseZipForm').onsubmit = async (e) => {
@@ -1670,14 +1760,8 @@ async function renderCaseManager(problemId) {
       nav(`/admin/problem/${problemUrl(problemId)}/data`);
     } catch (err) { showInlineError('#caseMsg', err); }
   };
-  qsa('.case-edit-form').forEach((form) => {
-    form.onsubmit = async (e) => {
-      e.preventDefault();
-      const caseId = e.target.dataset.caseId;
-      const f = formData(e.target);
-      await api(problemApi(problemId, `/cases/${caseId}`), { method: 'PUT', body: { input: f.input, output: f.output, subtask: f.subtask || '', score: Number(f.score) || 0, sort: Number(f.sort) || 0 } });
-      nav(`/admin/problem/${problemUrl(problemId)}/data`);
-    };
+  qsa('.case-edit-btn').forEach((btn) => {
+    btn.addEventListener('click', () => openCaseEditor(btn.dataset.problemId || problemId, btn.dataset.caseId));
   });
   qsa('.case-delete-btn').forEach((btn) => {
     btn.addEventListener('click', () => deleteCase(btn.dataset.problemId || problemId, btn.dataset.caseId));
@@ -1686,11 +1770,43 @@ async function renderCaseManager(problemId) {
 
 function renderCaseEditorBlock(problemId, c) {
   return `<form class="case-edit-form case-block" data-case-id="${esc(c.id)}">
-    <div class="row space"><h3>#${esc(c.sort)} 测试点</h3><button type="button" class="danger case-delete-btn" data-problem-id="${esc(problemId)}" data-case-id="${esc(c.id)}">删除</button></div>
+    <div class="row space"><h3>#${esc(c.sort)} 测试点</h3><button type="button" onclick="closeCaseEditor(${jsArg(c.id)})">收起</button></div>
     <div class="grid two"><div><label>输入</label><textarea name="input" class="case-text">${esc(c.input)}</textarea></div><div><label>标准输出</label><textarea name="output" class="case-text">${esc(c.output)}</textarea></div></div>
     <div class="grid three"><div><label>子任务</label><input name="subtask" value="${esc(c.subtask || '')}" placeholder="可选" /></div><div><label>分数</label><input name="score" value="${esc(c.score)}" /></div><div><label>排序</label><input name="sort" value="${esc(c.sort)}" /></div></div>
     <p><button>保存测试点</button></p>
   </form>`;
+}
+
+async function openCaseEditor(problemId, caseId) {
+  return runUiAction(async () => {
+    const mount = qs(`#${caseEditorId(caseId)}`);
+    if (!mount) return null;
+    if (mount.dataset.loaded === '1') {
+      mount.innerHTML = '';
+      mount.dataset.loaded = '0';
+      return null;
+    }
+    mount.innerHTML = '<div class="muted case-editor-loading">正在加载测试点内容...</div>';
+    const data = await api(problemApi(problemId, `/cases/${caseId}?content=1`));
+    mount.innerHTML = renderCaseEditorBlock(problemId, data.case);
+    mount.dataset.loaded = '1';
+    const form = qs('.case-edit-form', mount);
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const f = formData(e.target);
+      await api(problemApi(problemId, `/cases/${caseId}`), { method: 'PUT', body: { input: f.input, output: f.output, subtask: f.subtask || '', score: Number(f.score) || 0, sort: Number(f.sort) || 0 } });
+      nav(`/admin/problem/${problemUrl(problemId)}/data`);
+    };
+    return data;
+  });
+}
+
+function closeCaseEditor(caseId) {
+  const mount = qs(`#${caseEditorId(caseId)}`);
+  if (mount) {
+    mount.innerHTML = '';
+    mount.dataset.loaded = '0';
+  }
 }
 
 async function deleteCase(problemId, caseId) {
@@ -1701,6 +1817,8 @@ async function deleteCase(problemId, caseId) {
   });
 }
 window.deleteCase = deleteCase;
+window.openCaseEditor = openCaseEditor;
+window.closeCaseEditor = closeCaseEditor;
 
 window.editProblem = (id) => nav(`/admin/problem/${problemUrl(id)}/edit`);
 window.openProblemData = (id) => nav(`/admin/problem/${problemUrl(id)}/data`);

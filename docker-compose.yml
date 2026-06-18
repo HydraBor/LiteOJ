@@ -29,6 +29,29 @@ services:
     command: sh -lc "node scripts/init.js && node backend/server.js"
     restart: unless-stopped
 
+  go-judge:
+    build:
+      context: .
+      dockerfile: Dockerfile.go-judge
+      network: ${DOCKER_BUILD_NETWORK:-host}
+      args:
+        GO_JUDGE_BASE_IMAGE: ${GO_JUDGE_BASE_IMAGE:-criyle/go-judge:latest}
+        APT_MIRROR: ${DOCKER_BUILD_APT_MIRROR:-http://mirrors.tuna.tsinghua.edu.cn/debian}
+        APT_SECURITY_MIRROR: ${DOCKER_BUILD_APT_SECURITY_MIRROR:-http://mirrors.tuna.tsinghua.edu.cn/debian-security}
+    image: liteoj-go-judge:latest
+    container_name: liteoj-go-judge
+    privileged: true
+    shm_size: 256m
+    ports:
+      - "127.0.0.1:${GO_JUDGE_PORT:-5050}:5050"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5050/version >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
   judge:
     profiles:
       - container-judge
@@ -47,10 +70,15 @@ services:
       JUDGE_TOKEN: ${JUDGE_TOKEN:?JUDGE_TOKEN must be set in .env}
       JUDGE_ID: local-judge-1
       JUDGE_POLL_INTERVAL_MS: 2000
+      JUDGE_EXECUTOR: ${JUDGE_EXECUTOR:-go-judge}
+      GO_JUDGE_URL: http://go-judge:5050
       JUDGE_SANDBOX: ${JUDGE_SANDBOX:-host}
       JUDGE_SANDBOX_IMAGE: ${JUDGE_SANDBOX_IMAGE:-liteoj:latest}
     depends_on:
-      - app
+      app:
+        condition: service_started
+      go-judge:
+        condition: service_healthy
     command: node judge/worker.js
     user: "10001:10001"
     read_only: true

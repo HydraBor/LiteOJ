@@ -67,7 +67,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospac
 .muted { color: var(--muted); }
 .status { font-weight: 700; }
 .status.Accepted { color: var(--success); }
-.status.Wrong, .status.Runtime, .status.Compile, .status.System, .status.Time { color: var(--danger); }
+.status.Wrong, .status.Runtime, .status.Compile, .status.System, .status.Time, .status.Memory, .status.Output { color: var(--danger); }
 .badge { display: inline-block; padding: 2px 8px; border: 1px solid var(--line); border-radius: 99px; font-size: 12px; color: var(--muted); margin: 2px 6px 2px 0; background: #fff; }
 .badge.warn { color: var(--warn); border-color: #ead59d; background: #fff8e5; }
 .error { color: var(--danger); background: #fff1f1; border: 1px solid #ffd0d0; padding: 10px; border-radius: 8px; margin: 10px 0; }
@@ -940,6 +940,117 @@ a.back-btn { display: inline-flex; align-items: center; justify-content: center;
 a.back-btn:hover { background: #fbfcff; border-color: #cbd3e5; }
 .case-block .row.space { align-items: center; gap: 12px; }
 .case-delete-btn { min-width: 72px; }
+
+/* Testdata overview */
+.case-overview-card { overflow: visible; }
+.case-overview { display: grid; gap: 14px; }
+.case-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.case-summary-strip > div {
+  border: 1px solid #e4eaf4;
+  border-radius: 12px;
+  background: #fbfdff;
+  padding: 13px 15px;
+}
+.case-summary-strip b { display: block; color: #182237; font-size: 22px; line-height: 1.1; margin-bottom: 6px; }
+.case-summary-strip span { color: var(--muted); font-size: 12px; font-weight: 700; }
+.case-mode-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px dashed #d9e3f3;
+  border-radius: 12px;
+  background: #f8fbff;
+  padding: 10px 12px;
+}
+.case-mode-note p { margin: 0; line-height: 1.6; }
+.case-group-list { display: grid; gap: 14px; }
+.case-group-card {
+  border: 1px solid #e4eaf4;
+  border-radius: 14px;
+  background: #f9fbff;
+  overflow: hidden;
+}
+.case-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 15px 16px;
+  border-bottom: 1px solid #e8eef7;
+  background: #fff;
+}
+.case-group-head h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 5px;
+  color: #182237;
+  font-size: 17px;
+}
+.case-group-head h3 span {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 800;
+}
+.case-group-head p { margin: 0; font-size: 13px; }
+.case-group-score {
+  min-width: 76px;
+  text-align: right;
+  color: var(--accent);
+}
+.case-group-score b { font-size: 26px; line-height: 1; }
+.case-group-score span { margin-left: 4px; color: var(--muted); font-size: 13px; }
+.case-group-table-wrap { overflow-x: auto; }
+.case-group-table {
+  min-width: 860px;
+  border-radius: 0;
+  background: transparent;
+}
+.case-group-table th,
+.case-group-table td { padding: 10px 12px; background: #fff; }
+.case-group-table tbody tr:nth-child(4n + 1) td,
+.case-group-table tbody tr:nth-child(4n + 2) td { background: #fcfdff; }
+.case-group-table code {
+  color: #1f2937;
+  background: #f2f5fa;
+  border: 1px solid #e4eaf4;
+  border-radius: 7px;
+  padding: 4px 8px;
+}
+.case-index { font-weight: 900; color: #42506a; }
+.case-row-actions { min-width: 158px; }
+.case-editor-row td {
+  padding: 0 12px !important;
+  border-bottom: 0;
+}
+.case-inline-editor:empty { display: none; }
+.case-inline-editor .case-block {
+  margin: 10px 0 14px;
+  border-style: solid;
+  background: #fff;
+}
+.case-editor-loading {
+  padding: 12px;
+  border: 1px dashed #d9e3f3;
+  border-radius: 10px;
+  background: #fff;
+}
+.case-empty-state {
+  border: 1px dashed #d9e3f3;
+  border-radius: 14px;
+  background: #fbfdff;
+  padding: 22px;
+}
+.case-empty-state h3 { margin: 0 0 8px; }
+.case-empty-state p { margin: 0; }
+@media (max-width: 760px) {
+  .case-summary-strip { grid-template-columns: 1fr 1fr; }
+  .case-mode-note { align-items: flex-start; flex-direction: column; }
+}
 
 /* Data analysis */
 /* Analytics */

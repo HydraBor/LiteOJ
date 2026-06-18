@@ -353,6 +353,17 @@ router.get('/:id/cases', requireAdmin, (req, res, next) => {
   } catch (err) { return sendRouteError(res, err, next); }
 });
 
+router.get('/:id/cases/:caseId', requireAdmin, (req, res, next) => {
+  try {
+    const problemId = getParamId(req);
+    const caseId = Number(req.params.caseId);
+    const row = db.prepare('SELECT * FROM problem_cases WHERE id = ? AND problem_id = ?').get(caseId, problemId);
+    if (!row) return res.status(404).json({ error: '测试点不存在' });
+    const item = req.query.content === '1' ? readCaseContent(row) : caseFromRow(row);
+    return res.json({ case: item });
+  } catch (err) { return sendRouteError(res, err, next); }
+});
+
 router.post('/:id/cases/zip', requireAdmin, upload.single('file'), (req, res, next) => {
   try {
     const problemId = getParamId(req);

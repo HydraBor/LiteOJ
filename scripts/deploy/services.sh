@@ -33,6 +33,15 @@ port_used_by_current_app() {
   printf '%s\n' "$ports" | grep -Eq "(0\.0\.0\.0|::|127\.0\.0\.1):${port}->3000/tcp"
 }
 
+port_used_by_current_go_judge() {
+  local port="$1"
+  have docker || return 1
+  local ports
+  ports="$("${DOCKER[@]}" ps --filter 'name=^/liteoj-go-judge$' --format '{{.Ports}}' 2>/dev/null || true)"
+  [ -n "$ports" ] || return 1
+  printf '%s\n' "$ports" | grep -Eq "(0\.0\.0\.0|::|127\.0\.0\.1):${port}->5050/tcp"
+}
+
 ensure_web_port_available() {
   local requested="${PORT:-3000}"
   if ! printf '%s' "$requested" | grep -Eq '^[0-9]+$'; then
@@ -62,6 +71,37 @@ ensure_web_port_available() {
     fi
   done
   die "Port $requested is already in use and no free port was found before $end. Set PORT in .env manually."
+}
+
+ensure_go_judge_port_available() {
+  local requested="${GO_JUDGE_PORT:-5050}"
+  if ! printf '%s' "$requested" | grep -Eq '^[0-9]+$'; then
+    die "GO_JUDGE_PORT must be a number, got: $requested"
+  fi
+  if ! port_is_busy "$requested" || port_used_by_current_go_judge "$requested"; then
+    return 0
+  fi
+
+  if [ "${LITEOJ_AUTO_PORT:-1}" = "0" ]; then
+    die "go-judge port $requested is already in use. Stop the process using it or set GO_JUDGE_PORT in .env."
+  fi
+
+  local end="${LITEOJ_GO_JUDGE_PORT_SCAN_END:-5099}"
+  if ! printf '%s' "$end" | grep -Eq '^[0-9]+$'; then
+    end=5099
+  fi
+  local candidate
+  for candidate in $(seq "$((requested + 1))" "$end"); do
+    if ! port_is_busy "$candidate"; then
+      warn "go-judge port $requested is already in use; switching go-judge to port $candidate."
+      set_env_key GO_JUDGE_PORT "$candidate"
+      set_env_key GO_JUDGE_URL "http://127.0.0.1:${candidate}"
+      export GO_JUDGE_PORT="$candidate"
+      export GO_JUDGE_URL="http://127.0.0.1:${candidate}"
+      return 0
+    fi
+  done
+  die "go-judge port $requested is already in use and no free port was found before $end. Set GO_JUDGE_PORT in .env manually."
 }
 
 docker_available_for_user() {
@@ -106,6 +146,8 @@ start_judge() {
   inner+=" JUDGE_ID=$(quote "${JUDGE_ID:-same-server-judge-1}")"
   inner+=" JUDGE_POLL_INTERVAL_MS=$(quote "${JUDGE_POLL_INTERVAL_MS:-2000}")"
   inner+=" JUDGE_MAX_OUTPUT_BYTES=$(quote "${JUDGE_MAX_OUTPUT_BYTES:-1048576}")"
+  inner+=" JUDGE_EXECUTOR=$(quote "${JUDGE_EXECUTOR:-go-judge}")"
+  inner+=" GO_JUDGE_URL=$(quote "${GO_JUDGE_URL:-http://127.0.0.1:${GO_JUDGE_PORT:-5050}}")"
   inner+=" JUDGE_SANDBOX=docker"
   inner+=" JUDGE_SANDBOX_IMAGE=$(quote "${JUDGE_SANDBOX_IMAGE:-liteoj:latest}")"
   inner+=" JUDGE_SANDBOX_CPUS=$(quote "${JUDGE_SANDBOX_CPUS:-1}")"
@@ -114,7 +156,9 @@ start_judge() {
   inner+=" PATH=$(quote "$path_value")"
   inner+=" $(quote "$node_bin") judge/worker.js"
 
-  if docker_available_for_user; then
+  if [ "${JUDGE_EXECUTOR:-go-judge}" = "go-judge" ] || [ "${JUDGE_EXECUTOR:-go-judge}" = "gojudge" ]; then
+    cmd="$inner"
+  elif docker_available_for_user; then
     cmd="$inner"
   elif docker_available_with_sg; then
     log "Re-entering docker group for host judge"
@@ -123,7 +167,7 @@ start_judge() {
     die "The current user cannot run docker without sudo. Log out and back in after Docker group setup, or run: sudo usermod -aG docker $USER"
   fi
 
-  log "Starting host judge worker with Docker sandbox"
+  log "Starting host judge worker with ${JUDGE_EXECUTOR:-go-judge} executor"
   if have setsid; then
     setsid bash -lc "$cmd" >>"$JUDGE_LOG_FILE" 2>&1 &
   else
@@ -163,10 +207,12 @@ start_all() {
   load_env
   ensure_docker
   ensure_web_port_available
+  ensure_go_judge_port_available
   ensure_node
   prepare_base_image
-  log "Building and starting LiteOJ web container"
-  compose up -d --build app
+  prepare_go_judge_base_image
+  log "Building and starting LiteOJ web and go-judge containers"
+  compose up -d --build app go-judge
   start_judge
   print_start_summary
 }
@@ -207,9 +253,9 @@ logs_all() {
   mkdir -p "$LOG_DIR"
   touch "$JUDGE_LOG_FILE"
   if have docker && docker info >/dev/null 2>&1; then
-    (cd "$ROOT_DIR" && docker compose logs --tail=120 app) || true
+    (cd "$ROOT_DIR" && docker compose logs --tail=120 app go-judge) || true
   elif have sudo && sudo docker info >/dev/null 2>&1; then
-    (cd "$ROOT_DIR" && sudo docker compose logs --tail=120 app) || true
+    (cd "$ROOT_DIR" && sudo docker compose logs --tail=120 app go-judge) || true
   fi
   log "Following judge log. Press Ctrl+C to exit."
   tail -f "$JUDGE_LOG_FILE"
@@ -221,5 +267,6 @@ install_all() {
   ensure_docker
   ensure_node
   prepare_base_image
+  prepare_go_judge_base_image
   log "Install checks completed"
 }

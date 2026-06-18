@@ -14,6 +14,10 @@ JUDGE_TOKEN=$(random_secret)
 BACKEND_URL=http://127.0.0.1:${PORT:-3000}
 JUDGE_POLL_INTERVAL_MS=2000
 JUDGE_MAX_OUTPUT_BYTES=1048576
+JUDGE_EXECUTOR=go-judge
+GO_JUDGE_URL=http://127.0.0.1:5050
+GO_JUDGE_PORT=5050
+GO_JUDGE_BASE_IMAGE=criyle/go-judge:latest
 JUDGE_SANDBOX=docker
 JUDGE_SANDBOX_IMAGE=liteoj:latest
 JUDGE_SANDBOX_CPUS=1
@@ -30,6 +34,7 @@ DOCKER_BUILD_APT_SECURITY_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian-secu
 DOCKER_BUILD_NETWORK=host
 LITEOJ_AUTO_PORT=1
 LITEOJ_PORT_SCAN_END=3099
+LITEOJ_GO_JUDGE_PORT_SCAN_END=5099
 LITEOJ_APT_MIRROR=1
 EOF
     chmod 600 "$ENV_FILE" || true
@@ -46,6 +51,9 @@ EOF
   ensure_secret_key JUDGE_TOKEN
   ensure_plain_key JUDGE_POLL_INTERVAL_MS 2000
   ensure_plain_key JUDGE_MAX_OUTPUT_BYTES 1048576
+  ensure_plain_key JUDGE_EXECUTOR go-judge
+  ensure_plain_key GO_JUDGE_PORT 5050
+  ensure_plain_key GO_JUDGE_BASE_IMAGE criyle/go-judge:latest
   ensure_plain_key JUDGE_SANDBOX docker
   ensure_plain_key JUDGE_SANDBOX_IMAGE liteoj:latest
   ensure_plain_key JUDGE_SANDBOX_CPUS 1
@@ -62,18 +70,25 @@ EOF
   ensure_plain_key DOCKER_BUILD_NETWORK host
   ensure_plain_key LITEOJ_AUTO_PORT 1
   ensure_plain_key LITEOJ_PORT_SCAN_END 3099
+  ensure_plain_key LITEOJ_GO_JUDGE_PORT_SCAN_END 5099
   ensure_plain_key LITEOJ_APT_MIRROR 1
 
-  local port backend_url
+  local port backend_url go_judge_port go_judge_url
   port="$(env_value PORT)"
   backend_url="$(env_value BACKEND_URL)"
   if [ -z "$backend_url" ] || [ "$backend_url" = "http://app:3000" ]; then
     set_env_key BACKEND_URL "http://127.0.0.1:${port:-3000}"
   fi
+  go_judge_port="$(env_value GO_JUDGE_PORT)"
+  go_judge_url="$(env_value GO_JUDGE_URL)"
+  if [ -z "$go_judge_url" ] || [ "$go_judge_url" = "http://go-judge:5050" ]; then
+    set_env_key GO_JUDGE_URL "http://127.0.0.1:${go_judge_port:-5050}"
+  fi
 }
 
 print_start_summary() {
   log "LiteOJ is running at http://127.0.0.1:${PORT:-3000}"
+  log "go-judge is listening at ${GO_JUDGE_URL:-http://127.0.0.1:${GO_JUDGE_PORT:-5050}}"
   log "Judge log: $JUDGE_LOG_FILE"
   log "Admin user: ${ADMIN_USERNAME:-admin}"
   if [ "$NEW_ENV_CREATED" = "1" ]; then

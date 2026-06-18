@@ -40,9 +40,9 @@ chmod +x ./liteoj.sh
 
 `liteoj.sh start` 会做这些事：
 
-1. 如果 `.env` 不存在，自动生成 `.env`，并写入随机 `JWT_SECRET`、`JUDGE_TOKEN` 和 `ADMIN_PASSWORD`；
+1. 如果 `.env` 不存在或缺少关键项，自动生成/补齐 `.env`，并写入随机 `JWT_SECRET`、`JUDGE_TOKEN` 和 `ADMIN_PASSWORD`；
 2. 检查 Docker Engine 和 Docker Compose plugin，缺失时在 Ubuntu/Debian 上尝试自动安装；
-3. Docker Hub 访问不稳定时，写入 Docker registry 国内镜像；
+3. 写入并确认加载 Docker registry 国内镜像，已有自定义 Docker daemon 配置时不会覆盖；
 4. 检查宿主机 Node.js，缺失时从国内镜像准备 portable Node.js 22 到 `.runtime/node`；
 5. 启动 `docker compose up -d --build app`，只让 Web 服务进入容器；
 6. 在宿主机启动 `judge/worker.js`，并强制使用 `JUDGE_SANDBOX=docker`；
@@ -76,7 +76,35 @@ http://127.0.0.1:3000
 - Docker 使用官方 apt 仓库安装 Docker Engine、CLI、Buildx 和 Compose plugin；
 - Ubuntu/Debian 的 apt 源如果更新失败，会备份原文件并切换到清华镜像；
 - Docker registry mirror 默认写入 `docker.1ms.run` 和 `docker.m.daocloud.io`，已有自定义 `/etc/docker/daemon.json` 时不会覆盖；
+- 如果当前 shell 尚未继承 docker 组权限，脚本会尝试通过 `sg docker` 启动宿主机 judge；
 - Node.js 不强制写入系统目录，优先使用已有 Node/nvm；没有时下载 portable Node.js 到 `.runtime/node`。
+
+### Docker Hub 超时处理
+
+如果构建时看到类似错误：
+
+```text
+failed to resolve source metadata for docker.io/library/node:22-bookworm-slim
+dial tcp ... registry-1.docker.io:443: i/o timeout
+```
+
+通常说明 Docker daemon 没有加载 mirror 配置，或当前网络无法直连 Docker Hub。新版 `liteoj.sh` 会在构建前重启 Docker、检查 mirror 是否加载，并预拉取 `node:22-bookworm-slim`；如果 Docker Hub 仍然超时，会尝试直接从 mirror 拉取并重新标记镜像。
+
+手动处理命令如下：
+
+```bash
+sudo tee /etc/docker/daemon.json >/dev/null <<'JSON'
+{
+  "registry-mirrors": [
+    "https://docker.1ms.run",
+    "https://docker.m.daocloud.io"
+  ]
+}
+JSON
+sudo systemctl restart docker || sudo service docker restart
+docker info | grep -A5 "Registry Mirrors"
+docker pull node:22-bookworm-slim
+```
 
 ## 3. 云服务器手动初始化
 
@@ -178,48 +206,6 @@ sudo systemctl reload nginx
 ```
 
 HTTPS 可使用 certbot 或云厂商证书。
-
-## 6. 一键 Docker 部署
-
-推荐在云服务器上使用：
-
-```bash
-cd LiteOJ
-chmod +x ./liteoj.sh ./litoj.sh
-./liteoj.sh start
-```
-
-`liteoj.sh` 会：
-
-1. 自动创建 `.env` 并生成随机 `JWT_SECRET` / `JUDGE_TOKEN`；
-2. 检查 Docker Engine 和 Docker Compose plugin；
-3. 缺失时在 Ubuntu/Debian 上自动安装 Docker；
-4. 写入 Docker registry mirror；
-5. 重启 Docker daemon，让 mirror 配置立即生效；
-6. 构建前预拉取 `node:22-bookworm-slim`，如果 Docker Hub 超时会尝试国内 mirror 地址。
-
-如果看到下面这种错误：
-
-```text
-failed to resolve source metadata for docker.io/library/node:22-bookworm-slim
-dial tcp ... registry-1.docker.io:443: i/o timeout
-```
-
-说明 Docker daemon 没有加载 mirror 配置，或当前网络无法直连 Docker Hub。请使用新版 `liteoj.sh`，或手动执行：
-
-```bash
-sudo tee /etc/docker/daemon.json >/dev/null <<'JSON'
-{
-  "registry-mirrors": [
-    "https://docker.1ms.run",
-    "https://docker.m.daocloud.io"
-  ]
-}
-JSON
-sudo systemctl restart docker || sudo service docker restart
-docker info | grep -A5 "Registry Mirrors"
-docker pull node:22-bookworm-slim
-```
 
 ## 7. Docker Compose 手动部署
 

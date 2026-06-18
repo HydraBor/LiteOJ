@@ -75,27 +75,16 @@ http://localhost:3000
 admin / admin123
 ```
 
-### 一键 Docker 运行
+### 同机一键部署
 
-推荐在云服务器上使用脚本启动：
-
-```bash
-chmod +x ./liteoj.sh ./litoj.sh
-./liteoj.sh start
-```
-
-如果你误输入了 `./litoj.sh start` 也可以，`litoj.sh` 会自动转到 `liteoj.sh`。
-
-脚本会检查 Docker/Compose，缺失时自动安装；同时会配置 Docker 国内 registry mirror，并在构建前预拉取 `node:22-bookworm-slim`，避免 Docker Hub 直连超时。
-
-### Docker Compose 手动运行
+推荐在云服务器上使用脚本启动 Web 和评测端：
 
 ```bash
 chmod +x ./liteoj.sh
 ./liteoj.sh start
 ```
 
-脚本会自动检查 Docker、Docker Compose 和宿主机 Node.js；缺失时会尝试安装或准备 portable Node，并配置 Docker 国内镜像。启动后的推荐结构是：
+脚本会自动生成或补齐 `.env`，检查 Docker、Docker Compose 和宿主机 Node.js；缺失时会尝试安装或准备 portable Node，并配置 Docker 国内镜像。启动后的推荐结构是：
 
 ```text
 Web: Docker Compose app 容器
@@ -103,7 +92,7 @@ Judge: 宿主机 Node worker
 用户代码: 每次编译/运行进入无网络 Docker 沙箱容器
 ```
 
-已有旧数据库时，脚本不会覆盖已有管理员密码；如果仍是 `admin/admin123`，请登录后立即修改。
+已有旧数据库时，脚本不会覆盖数据库中的管理员密码；如果旧库仍是 `admin/admin123`，请登录后立即修改。新库的初始管理员密码写在 `.env` 的 `ADMIN_PASSWORD` 中。
 
 访问：
 
@@ -114,8 +103,7 @@ http://localhost:3000
 查看日志：
 
 ```bash
-docker compose logs -f app
-tail -f logs/judge.log
+./liteoj.sh logs
 ```
 
 停止：
@@ -130,7 +118,7 @@ tail -f logs/judge.log
 ./liteoj.sh status
 ```
 
-### Docker Compose 开发运行
+### Docker Compose 手动运行
 
 只启动 Web 容器：
 
@@ -140,7 +128,7 @@ cp .env.example .env
 docker compose up -d --build app
 ```
 
-如果只是本地或可信内网教学，也可以显式启用容器内 judge profile：
+公网同机部署请优先使用 `./liteoj.sh start`，由脚本在宿主机启动 Docker 沙箱 judge。如果只是本地或可信内网教学，也可以显式启用容器内 judge profile：
 
 ```bash
 docker compose --profile container-judge up -d --build

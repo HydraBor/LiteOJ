@@ -23,6 +23,9 @@ for (const doc of ['docs/DEVELOPMENT.md', 'docs/USER_MANUAL.md', 'docs/DEPLOYMEN
 const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
 assert(readme.includes('开发文档') && readme.includes('使用手册') && readme.includes('部署手册'), 'README should link the integrated documentation set');
 assert(!readme.includes('作答方式') && !readme.includes('分数线种子'), 'README should not keep retired preliminary filter/cutoff wording');
+const deploymentDoc = fs.readFileSync(path.join(__dirname, '..', 'docs', 'DEPLOYMENT.md'), 'utf8');
+assert(!readme.includes('litoj.sh') && !deploymentDoc.includes('litoj.sh'), 'docs should only document the real liteoj.sh entrypoint');
+assert(deploymentDoc.includes('Docker Hub 超时处理') && deploymentDoc.includes('node:22-bookworm-slim'), 'deployment docs should include Docker Hub timeout recovery');
 const dbJsFinal = fs.readFileSync(path.join(__dirname, '..', 'backend', 'db.js'), 'utf8');
 assert(!dbJsFinal.includes('prelim_cutoffs'), 'final simplified analytics should not create or migrate cutoff tables');
 const securityJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'security.js'), 'utf8');
@@ -204,6 +207,7 @@ assert(composeYaml.includes('JWT_SECRET:?') && composeYaml.includes('JUDGE_TOKEN
 const oneClickScript = fs.readFileSync(path.join(__dirname, '..', 'liteoj.sh'), 'utf8');
 assert(oneClickScript.includes('JUDGE_SANDBOX=docker') && oneClickScript.includes('compose up -d --build app'), 'one-click script should use host judge with Docker sandbox and only start the app service');
 assert(oneClickScript.includes('ADMIN_PASSWORD=$(random_secret)'), 'one-click script should generate a random initial admin password');
+assert(oneClickScript.includes('start_judge()') && oneClickScript.includes('sg docker') && oneClickScript.includes('judge/worker.js'), 'one-click script should start a host judge worker that can access Docker');
 
 const seedProblemJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'seed', 'problems', 'P1001', 'problem.json'), 'utf8'));
 assert(!seedProblemJson.description.includes('数学公式示例') && !seedProblemJson.description.includes('a^2+b^2'), 'seed A+B problem should not include unrelated math formula examples');

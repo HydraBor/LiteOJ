@@ -224,7 +224,6 @@ function problemFromRow(row) {
     difficulty: row.difficulty || 'unrated',
     timeLimit: row.time_limit,
     memoryLimit: row.memory_limit,
-    scoringMode: row.scoring_mode || 'oi',
     checkerMode: row.checker_mode || 'standard',
     checkerTolerance: Number(row.checker_tolerance || 0.000001),
     isPublic: Boolean(row.is_public),

@@ -1,11 +1,14 @@
 const fs = require('fs');
 const path = require('path');
-const bcrypt = require('bcryptjs');
 const { db, migrate, DATA_DIR } = require('../backend/db');
+const { hashPassword } = require('../backend/passwords');
 const { parsePaperQuestions } = require('../backend/prelim-utils');
 const { importParsedPaper } = require('../backend/routes/prelim');
 
 migrate();
+
+const DEFAULT_ADMIN_USERNAME = 'Algor';
+const DEFAULT_ADMIN_PASSWORD = 'Wuchuanmin_2003';
 
 
 function copyDirIfNeeded(src, dest) {
@@ -65,19 +68,37 @@ function seedPrelimPapers() {
 
 function seedAdmin() {
   const count = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
-  if (count > 0) return;
-  const username = process.env.ADMIN_USERNAME || 'admin';
-  const password = process.env.ADMIN_PASSWORD || 'admin123';
-  if (process.env.NODE_ENV === 'production' && (!process.env.ADMIN_PASSWORD || password === 'admin123' || password.length < 10)) {
-    throw new Error('ADMIN_PASSWORD must be set to a strong initial password in production');
+  const username = process.env.ADMIN_USERNAME || DEFAULT_ADMIN_USERNAME;
+  const password = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
+  const createAdmin = () => {
+    if (process.env.NODE_ENV === 'production' && (!password || password.length < 10)) {
+      throw new Error('ADMIN_PASSWORD must be set to a strong initial password in production');
+    }
+    db.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)')
+      .run(username, hashPassword(password), 'admin');
+    if (process.env.NODE_ENV === 'production') {
+      console.log(`Created admin user: ${username} (initial password comes from ADMIN_PASSWORD)`);
+    } else {
+      console.log(`Created default admin: ${username} / ${password}`);
+    }
+  };
+
+  if (count > 0) {
+    const admin = db.prepare("SELECT username FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").get();
+    if (admin) {
+      console.log(`Admin seed skipped; existing admin user: ${admin.username}`);
+      return;
+    }
+    const existingConfiguredUser = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+    if (existingConfiguredUser) {
+      db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(existingConfiguredUser.id);
+      console.log(`Promoted existing user to admin without changing password: ${username}`);
+      return;
+    }
+    createAdmin();
+    return;
   }
-  db.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)')
-    .run(username, bcrypt.hashSync(password, 10), 'admin');
-  if (process.env.NODE_ENV === 'production') {
-    console.log(`Created admin user: ${username} (initial password comes from ADMIN_PASSWORD)`);
-  } else {
-    console.log(`Created default admin: ${username} / ${password}`);
-  }
+  createAdmin();
 }
 
 function seedProblem(problemDir) {

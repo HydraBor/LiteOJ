@@ -32,15 +32,15 @@ npm run init
 默认管理员：
 
 ```text
-admin / admin123
+Algor / Wuchuanmin_2003
 ```
 
-该默认密码只用于本地开发和测试。`NODE_ENV=production` 下首次初始化必须提供强 `ADMIN_PASSWORD`，否则初始化会失败。
+`ADMIN_PASSWORD` 只在数据库还没有用户、需要创建初始管理员时使用。已有数据库再次执行初始化不会重置管理员密码。
 
 可用环境变量覆盖：
 
 ```bash
-ADMIN_USERNAME=teacher ADMIN_PASSWORD=change-me npm run init
+ADMIN_USERNAME=teacher ADMIN_PASSWORD=change-me-please npm run init
 ```
 
 ### Web 服务
@@ -82,13 +82,13 @@ POST /api/judge/:id/result
 
 并使用 `JUDGE_TOKEN` 鉴权。
 
-公网同机部署不要直接使用默认 `host` 模式。推荐使用根目录脚本：
+公网同机部署推荐使用根目录脚本：
 
 ```bash
 ./start.sh
 ```
 
-脚本会启动 Web 容器和 go-judge 容器，并在宿主机以 `JUDGE_EXECUTOR=go-judge` 启动 judge worker。这样用户代码会由 go-judge 受限执行环境处理，而不会和 Web 容器或 judge worker 共享同一进程空间。
+脚本会启动 Web 容器和 go-judge 容器，并在宿主机启动 judge worker。这样用户代码会由 go-judge 受限执行环境处理，而不会和 Web 容器或 judge worker 共享同一进程空间。
 
 ## 3. 目录说明
 
@@ -171,7 +171,7 @@ ABC2 < ABC10 < B1 < P1 < P10
 编程题评测配置：
 
 ```text
-scoringMode: oi / acm
+score: 普通测试点分值；有 subtask 时表示该子任务整组分值
 checkerMode: standard / ignore_space / case_insensitive / float
 checkerTolerance: 浮点比较误差，默认 1e-6
 ```
@@ -221,7 +221,7 @@ submissions 表写入 Waiting
 ↓
 judge worker 轮询 /api/judge/acquire
 ↓
-编译、运行、逐测试点比较，按 OI/ACM/子任务规则结算
+编译、运行、逐测试点比较，按测试点/子任务规则结算
 ↓
 POST /api/judge/:id/result
 ↓
@@ -242,18 +242,11 @@ PA
 SE
 ```
 
-judge worker 支持两种执行器：
+judge worker 固定使用 go-judge 作为执行端：
 
 ```text
-JUDGE_EXECUTOR=go-judge # 生产推荐，调用 go-judge REST API
-JUDGE_EXECUTOR=local    # 开发 fallback，继续使用 JUDGE_SANDBOX
-```
-
-`local` 执行器下仍有两种 legacy 沙箱：
-
-```text
-JUDGE_SANDBOX=host    # 本地 timeout + ulimit + 临时目录
-JUDGE_SANDBOX=docker  # 每次编译/运行进入无网络 Docker 容器
+GO_JUDGE_URL=http://127.0.0.1:5050
+GO_JUDGE_PROCESS_LIMIT=64
 ```
 
 公网同机部署时，推荐 Web 使用 Docker Compose `app` 服务，go-judge 使用 `go-judge` 服务，judge worker 在宿主机运行并通过 `GO_JUDGE_URL` 调用 `/run`。不要把 Docker socket 挂给 Web 容器。

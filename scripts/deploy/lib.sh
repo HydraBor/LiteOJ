@@ -55,6 +55,12 @@ set_env_key() {
   fi
 }
 
+remove_env_key() {
+  local key="$1"
+  [ -f "$ENV_FILE" ] || return 0
+  sed -i "/^${key}=.*/d" "$ENV_FILE"
+}
+
 is_placeholder() {
   local value="${1:-}"
   [ -z "$value" ] && return 0

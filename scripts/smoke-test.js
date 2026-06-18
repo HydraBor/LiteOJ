@@ -8,13 +8,14 @@ const {
 } = require('../backend/problem-utils');
 const { parsePaperQuestions, normalizeGroupName } = require('../backend/prelim-utils');
 const { compareOutput } = require('../judge/checker');
-const { applyScoring, normalizeExecutorMode } = require('../judge/runner');
+const { applyScoring } = require('../judge/runner');
 
 function ids(list) { return list.map((x) => x.id); }
 
 const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
 assert.strictEqual(packageJson.version, '1.3.0', 'package version should be 1.3.0 after judge system upgrade');
 assert(!('sync-cutoffs' in packageJson.scripts), 'retired cutoff synchronization script should not remain in package scripts');
+assert.strictEqual(packageJson.scripts['reset-admin'], 'node scripts/reset-admin.js', 'package scripts should expose a safe admin reset utility');
 assert(!fs.existsSync(path.join(__dirname, '..', 'scripts', 'sync-cutoffs.js')), 'retired cutoff synchronization script should be removed');
 assert(!fs.existsSync(path.join(__dirname, '..', 'seed', 'cutoffs')), 'retired cutoff seed directory should be removed');
 for (const doc of ['docs/DEVELOPMENT.md', 'docs/USER_MANUAL.md', 'docs/DEPLOYMENT.md', 'docs/ARCHITECTURE.md', 'docs/FINAL_REVIEW.md']) {
@@ -56,21 +57,19 @@ assert(compareOutput('1  2\n3\n', '1 2 3\n', { mode: 'ignore_space' }), 'ignore_
 assert(compareOutput('Yes\n', 'yes\n', { mode: 'case_insensitive' }), 'case_insensitive checker should ignore letter case');
 assert(compareOutput('3.1415926\n', '3.141593\n', { mode: 'float', tolerance: 0.00001 }), 'float checker should accept answers within tolerance');
 assert(!compareOutput('3.14\n', '3.20\n', { mode: 'float', tolerance: 0.00001 }), 'float checker should reject answers outside tolerance');
+const pointScore = applyScoring([
+  { caseId: 1, status: 'Accepted', rawScore: 30, score: 0 },
+  { caseId: 2, status: 'Wrong Answer', rawScore: 30, score: 0 },
+  { caseId: 3, status: 'Accepted', rawScore: 40, score: 0 },
+]);
+assert.strictEqual(pointScore.score, 70, 'plain test cases should add accepted case scores');
 const subtaskScore = applyScoring([
   { caseId: 1, subtask: 's1', status: 'Accepted', rawScore: 30, score: 0 },
   { caseId: 2, subtask: 's1', status: 'Wrong Answer', rawScore: 30, score: 0 },
   { caseId: 3, subtask: 's2', status: 'Accepted', rawScore: 40, score: 0 },
-], 'oi');
+]);
 assert.strictEqual(subtaskScore.status, 'Partially Accepted', 'subtask scoring should keep partial status');
 assert.strictEqual(subtaskScore.score, 40, 'failed subtask should award zero for every case in the group');
-const acmScore = applyScoring([
-  { caseId: 1, status: 'Accepted', rawScore: 50, score: 0 },
-  { caseId: 2, status: 'Wrong Answer', rawScore: 50, score: 0 },
-], 'acm');
-assert.strictEqual(acmScore.score, 0, 'ACM scoring should be all-or-nothing');
-assert.strictEqual(normalizeExecutorMode('gojudge'), 'go-judge', 'gojudge executor alias should normalize');
-assert.strictEqual(normalizeExecutorMode('go-judge'), 'go-judge', 'go-judge executor should normalize');
-assert.strictEqual(normalizeExecutorMode('docker'), 'local', 'legacy sandbox names should stay under local executor');
 
 const paperMd = fs.readFileSync(path.join(__dirname, '..', 'seed', 'prelim', '2025-CSP-J1.md'), 'utf8');
 const solutionMd = fs.readFileSync(path.join(__dirname, '..', 'seed', 'prelim', '2025-CSP-J1-solution.md'), 'utf8');
@@ -169,6 +168,7 @@ assert(appJs.includes('/logo-mark.svg'), 'auth page should use the SVG LiteOJ ma
 assert(appJs.includes('async function renderProfile') && appJs.includes('/api/profile/password') && appJs.includes("path === '/profile'"), 'frontend should provide a profile page for password changes');
 assert(appJs.includes("routeAnchor('/profile'"), 'logged-in user box should link to the profile page');
 assert(!appJs.includes('<h1>提交记录</h1>'), 'submissions page should not render a redundant page title');
+assert(appJs.includes('clearSubmissionPoll') && appJs.includes('location.pathname !== expectedPath'), 'submission polling should stop refreshing after the user leaves the submission page');
 const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public', 'index.html'), 'utf8');
 assert(indexHtml.includes('/logo.svg'), 'index.html should apply the full logo');
 assert(indexHtml.includes('/logo-mark.svg'), 'index.html should apply the favicon mark');
@@ -212,29 +212,41 @@ assert(composeYaml.includes('JWT_SECRET:?') && composeYaml.includes('JUDGE_TOKEN
 assert(composeYaml.includes('network: ${DOCKER_BUILD_NETWORK:-host}'), 'docker build should use host network by default for domestic cloud/router environments');
 assert(composeYaml.includes('go-judge:') && composeYaml.includes('Dockerfile.go-judge') && composeYaml.includes('127.0.0.1:${GO_JUDGE_PORT:-5050}:5050'), 'compose should include a loopback-bound go-judge service');
 const dockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8');
+const dockerignore = fs.readFileSync(path.join(__dirname, '..', '.dockerignore'), 'utf8');
 assert(dockerfile.includes('fetch-retries 5') && dockerfile.includes('registry.npmjs.org') && dockerfile.includes('npm ci --omit=dev'), 'Dockerfile npm install should use retries and fallback registries');
 const goJudgeDockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile.go-judge'), 'utf8');
-assert(goJudgeDockerfile.includes('criyle/go-judge') && goJudgeDockerfile.includes('gcc g++') && goJudgeDockerfile.includes('-http-addr'), 'go-judge Dockerfile should derive from official go-judge and install language toolchains');
+const goJudgeMount = fs.readFileSync(path.join(__dirname, '..', 'judge', 'mount.yaml'), 'utf8');
+assert(goJudgeDockerfile.includes('GO_JUDGE_VERSION=1.12.0') && goJudgeDockerfile.includes('/opt/go-judge -version') && !goJudgeDockerfile.includes('criyle/go-judge'), 'go-judge Dockerfile should use prepared release binaries instead of Docker Hub base images');
+assert(goJudgeDockerfile.includes('source=.runtime/go-judge/go-judge') && goJudgeDockerfile.includes('Using pre-downloaded go-judge binary'), 'go-judge Dockerfile should prefer the host-prepared binary from the build context');
+assert(goJudgeDockerfile.includes('gcc g++') && goJudgeDockerfile.includes('python3') && goJudgeDockerfile.includes('-http-addr'), 'go-judge Dockerfile should install language toolchains and expose HTTP mode');
+assert(goJudgeMount.includes('workDir: /w') && goJudgeMount.includes('source: /usr') && goJudgeMount.includes('uid: 1536'), 'go-judge mount configuration should provide compiler/runtime paths and an unprivileged container user');
+assert(dockerignore.includes('!.runtime/go-judge/go-judge'), 'dockerignore should allow the prepared go-judge binary into the build context');
 const oneClickScript = fs.readFileSync(path.join(__dirname, '..', 'start.sh'), 'utf8');
 const deployEnvScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy', 'env.sh'), 'utf8');
 const deployServiceScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy', 'services.sh'), 'utf8');
 const deployDockerScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy', 'docker.sh'), 'utf8');
 assert(oneClickScript.includes('scripts/deploy/services.sh'), 'start.sh should source modular deployment scripts');
-assert(deployServiceScript.includes('JUDGE_EXECUTOR') && deployServiceScript.includes('GO_JUDGE_URL') && deployServiceScript.includes('compose up -d --build app go-judge'), 'one-click script should start web plus go-judge and point the host judge worker at go-judge');
+assert(!deployServiceScript.includes('JUDGE_EXECUTOR') && deployServiceScript.includes('GO_JUDGE_URL') && deployServiceScript.includes('GO_JUDGE_PROCESS_LIMIT') && deployServiceScript.includes('compose up -d --build app go-judge'), 'one-click script should start web plus go-judge and point the host judge worker at go-judge only');
 assert(deployServiceScript.includes('ensure_web_port_available') && deployServiceScript.includes('LITEOJ_AUTO_PORT'), 'start script should auto-select a free web port when the default port is occupied');
 assert(deployServiceScript.includes('ensure_go_judge_port_available') && deployServiceScript.includes('LITEOJ_GO_JUDGE_PORT_SCAN_END'), 'start script should auto-select a free go-judge port when 5050 is occupied');
 assert(deployServiceScript.includes('/dev/tcp/127.0.0.1/$port'), 'port detection should also probe loopback so WSL/Docker Desktop notices Windows-side listeners');
-assert(deployEnvScript.includes('ADMIN_PASSWORD=$(random_secret)'), 'one-click script should generate a random initial admin password');
+assert(deployEnvScript.includes('ADMIN_USERNAME=Algor') && deployEnvScript.includes('ADMIN_PASSWORD=Wuchuanmin_2003'), 'one-click script should initialize the configured admin account');
+assert(deployEnvScript.includes('ensure_plain_key ADMIN_USERNAME Algor') && deployEnvScript.includes('is_placeholder "$(env_value ADMIN_PASSWORD)"'), 'one-click script should not reset existing admin credentials on every start');
 assert(deployServiceScript.includes('start_judge()') && deployServiceScript.includes('judge/worker.js'), 'one-click script should start a host judge worker');
-assert(deployDockerScript.includes('mirrors.tuna.tsinghua.edu.cn/docker-ce') && deployDockerScript.includes('docker.1ms.run') && deployDockerScript.includes('prepare_go_judge_base_image'), 'deployment should prefer domestic Docker apt/registry mirrors and pre-pull go-judge');
+assert(deployDockerScript.includes('mirrors.tuna.tsinghua.edu.cn/docker-ce') && deployDockerScript.includes('docker.1ms.run') && deployDockerScript.includes('Preparing base image debian:bookworm-slim') && deployDockerScript.includes('prepare_go_judge_binary'), 'deployment should prefer domestic Docker apt/registry mirrors and prepare go-judge outside Docker Hub mirrors');
 
 const seedProblemJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'seed', 'problems', 'P1001', 'problem.json'), 'utf8'));
 assert(!seedProblemJson.description.includes('数学公式示例') && !seedProblemJson.description.includes('a^2+b^2'), 'seed A+B problem should not include unrelated math formula examples');
 assert(seedProblemJson.description.includes('$a$') && seedProblemJson.description.includes('$b$') && seedProblemJson.description.includes('$a+b$'), 'seed A+B problem should keep formulas related to the statement itself');
 assert.deepStrictEqual(seedProblemJson.tags, ['模拟'], 'seed A+B problem should only keep the 模拟 tag');
 const initJs = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'init.js'), 'utf8');
+const resetAdminJs = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'reset-admin.js'), 'utf8');
 assert(initJs.includes('shouldRefreshSample') && initJs.includes('数学公式示例') && initJs.includes("raw.id === 'P1001'") && initJs.includes("JSON.stringify(['模拟'])"), 'init should refresh stored P1001 statement/tags when rerun');
-assert(initJs.includes('ADMIN_PASSWORD must be set to a strong initial password in production'), 'production initialization should reject default admin password');
+assert(initJs.includes("DEFAULT_ADMIN_USERNAME = 'Algor'") && initJs.includes("DEFAULT_ADMIN_PASSWORD = 'Wuchuanmin_2003'"), 'init should use the configured default admin credentials');
+assert(initJs.includes('hashPassword(password)') && !initJs.includes('bcrypt.hashSync'), 'init should use centralized bcrypt password helpers');
+assert(initJs.includes('Admin seed skipped; existing admin user') && initJs.includes("UPDATE users SET role = 'admin'"), 'init should not reset existing admin passwords and should recover databases without an admin');
+assert(initJs.includes('ADMIN_PASSWORD must be set to a strong initial password in production'), 'production initialization should reject weak admin passwords');
+assert(resetAdminJs.includes('existingTarget') && resetAdminJs.includes("UPDATE users SET password_hash = ?, role = 'admin'") && resetAdminJs.includes('existingAdmin'), 'admin reset should handle an existing target username before renaming another admin');
 
 const routes = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'problems.js'), 'utf8');
 assert(routes.includes('TESTDATA_UNZIPPED_LIMIT') && routes.includes('测试数据解压后总大小不能超过'), 'zip upload should limit total uncompressed testdata size');
@@ -288,15 +300,15 @@ for (const col of [
   "ensureColumn('problems', 'description'",
   "ensureColumn('problems', 'tags_json'",
   "ensureColumn('problems', 'time_limit'",
-  "ensureColumn('problems', 'scoring_mode'",
   "ensureColumn('problems', 'checker_mode'",
   "ensureColumn('problem_cases', 'subtask'",
   "ensureColumn('submissions', 'optimize'",
 ]) {
   assert(dbJs.includes(col), `database migration missing ${col}`);
 }
-assert(appJs.includes('SCORING_MODES') && appJs.includes('CHECKER_MODES') && appJs.includes('name="scoringMode"') && appJs.includes('name="checkerMode"') && appJs.includes('name="subtask"'), 'frontend should expose scoring, checker, and subtask controls');
-const sandboxJs = fs.readFileSync(path.join(__dirname, '..', 'judge', 'sandbox.js'), 'utf8');
-assert(sandboxJs.includes("'--network', 'none'") && sandboxJs.includes("'--read-only'") && sandboxJs.includes("'--cap-drop', 'ALL'"), 'docker sandbox should disable network and drop container privileges');
+assert(!appJs.includes('SCORING_MODES') && !appJs.includes('name="scoringMode"') && appJs.includes('CHECKER_MODES') && appJs.includes('name="checkerMode"') && appJs.includes('name="subtask"'), 'frontend should expose checker and subtask controls without OI/ACM scoring modes');
+const runnerJs = fs.readFileSync(path.join(__dirname, '..', 'judge', 'runner.js'), 'utf8');
+assert(!fs.existsSync(path.join(__dirname, '..', 'judge', 'sandbox.js')), 'legacy local sandbox implementation should be removed');
+assert(!runnerJs.includes('child_process') && !runnerJs.includes('JUDGE_EXECUTOR') && !runnerJs.includes('runProcess') && runnerJs.includes('createGoJudgeExecution'), 'judge runner should use go-judge as the only execution backend');
 
-console.log('Smoke tests passed: programming problems, judge modes, and CSP preliminary question bank logic look consistent.');
+console.log('Smoke tests passed: programming problems, go-judge execution, and CSP preliminary question bank logic look consistent.');

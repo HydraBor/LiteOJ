@@ -11,6 +11,7 @@
   },
   "scripts": {
     "init": "node scripts/init.js",
+    "reset-admin": "node scripts/reset-admin.js",
     "start": "node backend/server.js",
     "judge": "node judge/worker.js",
     "check": "find backend judge scripts frontend/public -name \"*.js\" -print0 | xargs -0 -n1 node --check",

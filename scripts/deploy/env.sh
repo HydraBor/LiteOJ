@@ -1,28 +1,24 @@
 ensure_env() {
   if [ ! -f "$ENV_FILE" ]; then
     NEW_ENV_CREATED=1
-    log "Creating .env with random production secrets"
+    log "Creating .env with production secrets and default admin"
     cat > "$ENV_FILE" <<EOF
 PORT=${PORT:-3000}
 NODE_ENV=production
 DATA_DIR=/app/data
 DATABASE_PATH=/app/data/liteoj.db
 JWT_SECRET=$(random_secret)
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=$(random_secret)
+ADMIN_USERNAME=Algor
+ADMIN_PASSWORD=Wuchuanmin_2003
 JUDGE_TOKEN=$(random_secret)
 BACKEND_URL=http://127.0.0.1:${PORT:-3000}
 JUDGE_POLL_INTERVAL_MS=2000
 JUDGE_MAX_OUTPUT_BYTES=1048576
-JUDGE_EXECUTOR=go-judge
 GO_JUDGE_URL=http://127.0.0.1:5050
 GO_JUDGE_PORT=5050
-GO_JUDGE_BASE_IMAGE=criyle/go-judge:latest
-JUDGE_SANDBOX=docker
-JUDGE_SANDBOX_IMAGE=liteoj:latest
-JUDGE_SANDBOX_CPUS=1
-JUDGE_PROCESS_LIMIT=64
-JUDGE_FILE_LIMIT_KB=65536
+GO_JUDGE_VERSION=1.12.0
+GO_JUDGE_RELEASE_BASE=https://github.com/criyle/go-judge/releases/download
+GO_JUDGE_PROCESS_LIMIT=64
 TESTDATA_ZIP_LIMIT=50
 TESTDATA_UNZIPPED_LIMIT=200
 LOGIN_RATE_LIMIT=20
@@ -45,20 +41,18 @@ EOF
   ensure_plain_key NODE_ENV production
   ensure_plain_key DATA_DIR /app/data
   ensure_plain_key DATABASE_PATH /app/data/liteoj.db
-  ensure_plain_key ADMIN_USERNAME admin
+  ensure_plain_key ADMIN_USERNAME Algor
   ensure_secret_key JWT_SECRET
-  ensure_secret_key ADMIN_PASSWORD
+  if is_placeholder "$(env_value ADMIN_PASSWORD)"; then
+    set_env_key ADMIN_PASSWORD Wuchuanmin_2003
+  fi
   ensure_secret_key JUDGE_TOKEN
   ensure_plain_key JUDGE_POLL_INTERVAL_MS 2000
   ensure_plain_key JUDGE_MAX_OUTPUT_BYTES 1048576
-  ensure_plain_key JUDGE_EXECUTOR go-judge
   ensure_plain_key GO_JUDGE_PORT 5050
-  ensure_plain_key GO_JUDGE_BASE_IMAGE criyle/go-judge:latest
-  ensure_plain_key JUDGE_SANDBOX docker
-  ensure_plain_key JUDGE_SANDBOX_IMAGE liteoj:latest
-  ensure_plain_key JUDGE_SANDBOX_CPUS 1
-  ensure_plain_key JUDGE_PROCESS_LIMIT 64
-  ensure_plain_key JUDGE_FILE_LIMIT_KB 65536
+  ensure_plain_key GO_JUDGE_VERSION 1.12.0
+  ensure_plain_key GO_JUDGE_RELEASE_BASE https://github.com/criyle/go-judge/releases/download
+  ensure_plain_key GO_JUDGE_PROCESS_LIMIT 64
   ensure_plain_key TESTDATA_ZIP_LIMIT 50
   ensure_plain_key TESTDATA_UNZIPPED_LIMIT 200
   ensure_plain_key LOGIN_RATE_LIMIT 20
@@ -72,6 +66,15 @@ EOF
   ensure_plain_key LITEOJ_PORT_SCAN_END 3099
   ensure_plain_key LITEOJ_GO_JUDGE_PORT_SCAN_END 5099
   ensure_plain_key LITEOJ_APT_MIRROR 1
+  remove_env_key JUDGE_EXECUTOR
+  remove_env_key JUDGE_SANDBOX
+  remove_env_key JUDGE_SANDBOX_IMAGE
+  remove_env_key JUDGE_SANDBOX_CPUS
+  remove_env_key JUDGE_PROCESS_LIMIT
+  remove_env_key JUDGE_FILE_LIMIT_KB
+  remove_env_key JUDGE_GOJUDGE_URL
+  remove_env_key JUDGE_GOJUDGE_TOKEN
+  remove_env_key GO_JUDGE_BASE_IMAGE
 
   local port backend_url go_judge_port go_judge_url
   port="$(env_value PORT)"
@@ -90,11 +93,11 @@ print_start_summary() {
   log "LiteOJ is running at http://127.0.0.1:${PORT:-3000}"
   log "go-judge is listening at ${GO_JUDGE_URL:-http://127.0.0.1:${GO_JUDGE_PORT:-5050}}"
   log "Judge log: $JUDGE_LOG_FILE"
-  log "Admin user: ${ADMIN_USERNAME:-admin}"
+  log "Admin user: ${ADMIN_USERNAME:-Algor}"
   if [ "$NEW_ENV_CREATED" = "1" ]; then
     log "Initial admin password: $(env_value ADMIN_PASSWORD)"
-    log "The password is also saved in .env as ADMIN_PASSWORD."
+    log "The initial password is saved in .env as ADMIN_PASSWORD."
   else
-    log "Admin password is the existing password in the database; .env is not used to reset old databases."
+    log "Existing databases keep their current admin password; start.sh will not reset it from .env."
   fi
 }

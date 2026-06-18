@@ -61,7 +61,7 @@ async function main() {
     assert((await res.text()).includes('<main id="app"'), `SPA route ${route} should return frontend app shell`);
   }
 
-  await request('POST', '/api/auth/login', { username: 'admin', password: 'admin123' });
+  await request('POST', '/api/auth/login', { username: 'Algor', password: 'Wuchuanmin_2003' });
   const me = await request('GET', '/api/auth/me');
   assert.strictEqual(me.user.role, 'admin', 'admin login should work');
 
@@ -74,14 +74,12 @@ async function main() {
     difficulty: 'beginner',
     timeLimit: 1000,
     memoryLimit: 128,
-    scoringMode: 'acm',
     checkerMode: 'ignore_space',
     checkerTolerance: 0.000001,
     tags: ['烟测', '加法'],
     isPublic: true,
   });
   assert.strictEqual(created.problem.id, problemId, 'problem create should preserve string id');
-  assert.strictEqual(created.problem.scoringMode, 'acm', 'problem create should save scoring mode');
   assert.strictEqual(created.problem.checkerMode, 'ignore_space', 'problem create should save checker mode');
 
   const updated = await request('PUT', `/api/problems/${encodeURIComponent(problemId)}`, {
@@ -91,14 +89,12 @@ async function main() {
     difficulty: 'popular_minus',
     timeLimit: 1200,
     memoryLimit: 256,
-    scoringMode: 'oi',
     checkerMode: 'float',
     checkerTolerance: 0.00001,
     tags: ['烟测', '编辑'],
     isPublic: true,
   });
   assert.strictEqual(updated.problem.title, '烟测编辑题', 'problem edit should update title');
-  assert.strictEqual(updated.problem.scoringMode, 'oi', 'problem edit should update scoring mode');
   assert.strictEqual(updated.problem.checkerMode, 'float', 'problem edit should update checker mode');
 
   const addedCase = await request('POST', `/api/problems/${encodeURIComponent(problemId)}/cases`, {

@@ -39,16 +39,22 @@ cd LiteOJ
 
 `start.sh` 会做这些事：
 
-1. 如果 `.env` 不存在或缺少关键项，自动生成/补齐 `.env`，并写入随机 `JWT_SECRET`、`JUDGE_TOKEN` 和 `ADMIN_PASSWORD`；
+1. 如果 `.env` 不存在或缺少关键项，自动生成/补齐 `.env`，写入随机 `JWT_SECRET`、`JUDGE_TOKEN`，并补齐首次建库使用的默认管理员；
 2. 非 root 用户会提示输入 sudo 密码，用于安装 Docker、调整 apt 源和启动 Docker daemon；
 3. 在 Ubuntu/Debian 上把 apt、Docker apt 仓库、Docker registry、Node.js 下载和 npm registry 尽量切到国内镜像；
 4. 检查 Docker Engine 和 Docker Compose plugin，缺失时在 Ubuntu/Debian 上尝试自动安装；
 5. 检查宿主机 Node.js，缺失时从国内镜像准备 portable Node.js 22 到 `.runtime/node`；
 6. 启动 `docker compose up -d --build app go-judge`，让 Web 服务和 go-judge 服务进入容器；
 7. go-judge 只绑定宿主机 `127.0.0.1:${GO_JUDGE_PORT:-5050}`，不对公网暴露；
-8. 在宿主机启动 `judge/worker.js`，默认使用 `JUDGE_EXECUTOR=go-judge` 调用 go-judge `/run`。
+8. 在宿主机启动 `judge/worker.js`，通过 `GO_JUDGE_URL` 调用 go-judge `/run`。
 
-如果服务器上已经存在旧数据库，脚本不会覆盖已有管理员密码。旧部署仍使用 `admin/admin123` 的，请登录后到个人主页立即修改密码，或清空数据卷后重新初始化。
+如果服务器上已经存在旧数据库，脚本不会覆盖已有管理员密码。新库默认管理员为 `Algor / Wuchuanmin_2003`，正式公开前建议登录后修改。
+
+如果旧库管理员密码遗失，重建镜像后可在项目目录执行：
+
+```bash
+docker compose exec app npm run reset-admin -- Algor Wuchuanmin_2003
+```
 
 常用命令：
 
@@ -76,7 +82,7 @@ http://127.0.0.1:3000
 - Docker 使用官方 apt 仓库安装 Docker Engine、CLI、Buildx 和 Compose plugin；
 - Ubuntu/Debian 的 apt 源如果更新失败，会备份原文件并切换到清华镜像；
 - Docker registry mirror 默认写入 `docker.1ms.run` 和 `docker.m.daocloud.io`，已有自定义 `/etc/docker/daemon.json` 时不会覆盖；
-- legacy `JUDGE_EXECUTOR=local` 才需要 judge worker 直接访问 Docker；默认 go-judge 模式下宿主机 worker 不需要继承 docker 组权限；
+- 宿主机 judge worker 只访问 go-judge HTTP 接口，不需要继承 docker 组权限；
 - Node.js 不强制写入系统目录，优先使用已有 Node/nvm；没有时下载 portable Node.js 到 `.runtime/node`。
 
 ### Docker Hub 超时处理
@@ -88,7 +94,9 @@ failed to resolve source metadata for docker.io/library/node:22-bookworm-slim
 dial tcp ... registry-1.docker.io:443: i/o timeout
 ```
 
-通常说明 Docker daemon 没有加载 mirror 配置，或当前网络无法直连 Docker Hub。新版 `start.sh` 会在构建前检查 mirror 是否加载，并预拉取 `node:22-bookworm-slim`；如果 Docker Hub 仍然超时，会尝试直接从 mirror 拉取并重新标记镜像。
+通常说明 Docker daemon 没有加载 mirror 配置，或当前网络无法直连 Docker Hub。新版 `start.sh` 会在构建前检查 mirror 是否加载，并预拉取 `node:22-bookworm-slim` 与 `debian:bookworm-slim`；如果 Docker Hub 仍然超时，会尝试直接从 mirror 拉取并重新标记镜像。
+
+go-judge 不再依赖 `criyle/go-judge` Docker Hub 基础镜像。`start.sh` 会先把 `GO_JUDGE_VERSION` 对应的二进制下载到 `.runtime/go-judge/go-judge`，再由 Dockerfile 复制进镜像；如果服务器无法访问 GitHub release，可把 `GO_JUDGE_RELEASE_BASE` 改成你自己的 release 反代或内网文件服务地址。
 
 手动处理命令如下：
 
@@ -151,10 +159,10 @@ npm run judge
 
 生产环境建议用 PM2 或 systemd 守护。
 
-直接部署只推荐本地或可信内网使用，默认 `npm run judge` 会走 `JUDGE_EXECUTOR=local`。如果面向公网提交编程题，请优先改用 `./start.sh` 或自行部署 go-judge 后启动 worker：
+直接部署只推荐本地或可信内网使用。评测仍必须连接 go-judge；如果面向公网提交编程题，请优先改用 `./start.sh`，或自行部署 go-judge 后启动 worker：
 
 ```bash
-JUDGE_EXECUTOR=go-judge GO_JUDGE_URL=http://127.0.0.1:5050 npm run judge
+GO_JUDGE_URL=http://127.0.0.1:5050 npm run judge
 ```
 
 ## 5. PM2 守护
@@ -162,7 +170,7 @@ JUDGE_EXECUTOR=go-judge GO_JUDGE_URL=http://127.0.0.1:5050 npm run judge
 ```bash
 sudo npm install -g pm2
 pm2 start backend/server.js --name liteoj-web
-JUDGE_EXECUTOR=go-judge GO_JUDGE_URL=http://127.0.0.1:5050 pm2 start judge/worker.js --name liteoj-judge
+GO_JUDGE_URL=http://127.0.0.1:5050 pm2 start judge/worker.js --name liteoj-judge
 pm2 save
 pm2 startup
 ```
@@ -211,15 +219,17 @@ HTTPS 可使用 certbot 或云厂商证书。
 
 ```bash
 cp .env.example .env
-# 修改 JWT_SECRET / JUDGE_TOKEN / ADMIN_PASSWORD
+# 首次建库前修改 JWT_SECRET / JUDGE_TOKEN / ADMIN_PASSWORD
+./start.sh install
 docker compose up -d --build app
 ```
 
 只启动 `app` 适合作为 Web-only 容器。需要完整评测链路时同时启动 go-judge：
 
 ```bash
+./start.sh install
 docker compose up -d --build app go-judge
-JUDGE_EXECUTOR=go-judge GO_JUDGE_URL=http://127.0.0.1:5050 npm run judge
+GO_JUDGE_URL=http://127.0.0.1:5050 npm run judge
 ```
 
 公网同机部署请优先使用 `./start.sh`，由脚本负责端口避让、构建 go-judge 镜像并启动宿主机 judge worker。
@@ -287,21 +297,17 @@ NODE_ENV=production
 DATA_DIR=/app/data
 DATABASE_PATH=/app/data/liteoj.db
 JWT_SECRET=replace-this-with-a-long-random-string
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=replace-this-admin-password
+ADMIN_USERNAME=Algor
+ADMIN_PASSWORD=Wuchuanmin_2003
 JUDGE_TOKEN=replace-this-judge-token
 BACKEND_URL=http://127.0.0.1:3000
 JUDGE_POLL_INTERVAL_MS=2000
 JUDGE_MAX_OUTPUT_BYTES=1048576
-JUDGE_EXECUTOR=go-judge
 GO_JUDGE_URL=http://127.0.0.1:5050
 GO_JUDGE_PORT=5050
-GO_JUDGE_BASE_IMAGE=criyle/go-judge:latest
-JUDGE_SANDBOX=docker
-JUDGE_SANDBOX_IMAGE=liteoj:latest
-JUDGE_SANDBOX_CPUS=1
-JUDGE_PROCESS_LIMIT=64
-JUDGE_FILE_LIMIT_KB=65536
+GO_JUDGE_VERSION=1.12.0
+GO_JUDGE_RELEASE_BASE=https://github.com/criyle/go-judge/releases/download
+GO_JUDGE_PROCESS_LIMIT=64
 TESTDATA_ZIP_LIMIT=50
 TESTDATA_UNZIPPED_LIMIT=200
 LOGIN_RATE_LIMIT=20
@@ -317,7 +323,7 @@ LITEOJ_GO_JUDGE_PORT_SCAN_END=5099
 LITEOJ_APT_MIRROR=1
 ```
 
-正式部署必须修改：
+正式公开前建议修改：
 
 ```text
 JWT_SECRET
@@ -329,7 +335,6 @@ ADMIN_PASSWORD
 
 ```text
 BACKEND_URL=http://127.0.0.1:3000
-JUDGE_EXECUTOR=go-judge
 GO_JUDGE_URL=http://127.0.0.1:5050
 ```
 
@@ -337,7 +342,6 @@ GO_JUDGE_URL=http://127.0.0.1:5050
 
 ```text
 BACKEND_URL=http://app:3000
-JUDGE_EXECUTOR=go-judge
 GO_JUDGE_URL=http://go-judge:5050
 ```
 
@@ -381,7 +385,7 @@ tar -xzf liteoj-data-YYYY-MM-DD.tar.gz
 - 同机部署时不要把 Docker socket 挂给 Web 容器。
 - 推荐使用 `./start.sh` 的“Web 容器 + go-judge 容器 + 宿主机 judge worker”结构。
 - 不要把 go-judge 的 5050 端口暴露到公网；默认 Compose 已绑定到 `127.0.0.1`。
-- `JUDGE_EXECUTOR=local` 和容器内 `host` judge 只用于本地和可信内网，不要用于陌生公网用户。
+- LiteOJ 不再保留本地执行器，评测执行端统一是 go-judge。
 - 更高安全等级仍建议把 judge 拆到独立主机/VM，并评估 isolate、nsjail、gVisor 或 Firecracker。
 - 不建议让 Web 服务和 judge 共享同一高权限用户；judge 不需要挂载 `data/`，只通过 API 领取测试数据。
 - 保留登录/注册限速；如反向代理后面还有 WAF 或限流，可以配合调大 `LOGIN_RATE_LIMIT` 和 `REGISTER_RATE_LIMIT`。

@@ -158,22 +158,62 @@ prepare_base_image() {
   die "Cannot pull node:22-bookworm-slim. Check server network or configure a reachable Docker mirror."
 }
 
-prepare_go_judge_base_image() {
-  local image="${GO_JUDGE_BASE_IMAGE:-criyle/go-judge:latest}"
-  log "Preparing go-judge base image $image"
-  if "${DOCKER[@]}" pull "$image"; then
+prepare_debian_base_image() {
+  log "Preparing base image debian:bookworm-slim"
+  if "${DOCKER[@]}" pull debian:bookworm-slim; then
     return 0
   fi
-  warn "Pull through Docker Hub failed; trying direct mirror images for go-judge."
-  if [ "$image" = "criyle/go-judge:latest" ]; then
-    for mirror in docker.1ms.run docker.m.daocloud.io; do
-      if "${DOCKER[@]}" pull "${mirror}/criyle/go-judge:latest"; then
-        "${DOCKER[@]}" tag "${mirror}/criyle/go-judge:latest" "$image"
-        return 0
-      fi
-    done
+  warn "Pull through Docker Hub failed; trying direct mirror images for Debian."
+  for mirror in docker.1ms.run docker.m.daocloud.io; do
+    if "${DOCKER[@]}" pull "${mirror}/library/debian:bookworm-slim"; then
+      "${DOCKER[@]}" tag "${mirror}/library/debian:bookworm-slim" debian:bookworm-slim
+      return 0
+    fi
+  done
+  die "Cannot pull debian:bookworm-slim. Check server network or configure a reachable Docker mirror."
+}
+
+go_judge_asset_arch() {
+  local arch
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) printf 'amd64v2' ;;
+    aarch64|arm64) printf 'arm64' ;;
+    i386|i686) printf '386' ;;
+    armv7l) printf 'armv7' ;;
+    armv5*) printf 'armv5' ;;
+    *) die "Unsupported CPU architecture for go-judge: $arch" ;;
+  esac
+}
+
+prepare_go_judge_binary() {
+  install_basic_tools
+  local version base asset_arch url dest tmp
+  version="${GO_JUDGE_VERSION:-1.12.0}"
+  base="${GO_JUDGE_RELEASE_BASE:-https://github.com/criyle/go-judge/releases/download}"
+  asset_arch="$(go_judge_asset_arch)"
+  url="${base}/v${version}/go-judge_${version}_linux_${asset_arch}"
+  dest="$RUNTIME_DIR/go-judge/go-judge"
+  tmp="${dest}.tmp"
+
+  mkdir -p "$(dirname "$dest")"
+  if [ -x "$dest" ] && "$dest" -version 2>/dev/null | grep -q "v${version}"; then
+    log "go-judge binary already prepared: $dest"
+    return 0
   fi
-  die "Cannot pull $image. Check server network or configure GO_JUDGE_BASE_IMAGE to a reachable mirror image."
+
+  log "Preparing go-judge binary $version for $asset_arch"
+  if ! curl -fL --retry 5 --retry-delay 2 --connect-timeout 20 -o "$tmp" "$url"; then
+    rm -f "$tmp"
+    die "Cannot download go-judge from $url. Set GO_JUDGE_RELEASE_BASE to a reachable release mirror."
+  fi
+  chmod 0755 "$tmp"
+  mv "$tmp" "$dest"
+}
+
+prepare_go_judge_base_image() {
+  prepare_debian_base_image
+  prepare_go_judge_binary
 }
 
 ensure_docker() {

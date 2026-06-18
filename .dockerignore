@@ -5,6 +5,9 @@ uploads
 backups
 .tmp
 .runtime
+!.runtime/
+!.runtime/go-judge/
+!.runtime/go-judge/go-judge
 logs
 .env
 *.log

@@ -1,12 +1,10 @@
 const { judgeTask } = require('./runner');
-const { SANDBOX_MODE } = require('./sandbox');
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://127.0.0.1:3000';
 const JUDGE_TOKEN = process.env.JUDGE_TOKEN || 'dev-judge-token';
 const POLL_INTERVAL_MS = Number(process.env.JUDGE_POLL_INTERVAL_MS || 2000);
 const JUDGE_ID = process.env.JUDGE_ID || `judge-${process.pid}`;
-const JUDGE_EXECUTOR = String(process.env.JUDGE_EXECUTOR || 'local').toLowerCase();
-const GO_JUDGE_URL = process.env.GO_JUDGE_URL || process.env.JUDGE_GOJUDGE_URL || 'http://127.0.0.1:5050';
+const GO_JUDGE_URL = process.env.GO_JUDGE_URL || 'http://127.0.0.1:5050';
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
@@ -32,10 +30,7 @@ async function once() {
 }
 
 async function main() {
-  const executorInfo = JUDGE_EXECUTOR === 'go-judge' || JUDGE_EXECUTOR === 'gojudge'
-    ? `executor=go-judge, goJudge=${GO_JUDGE_URL}`
-    : `executor=local, sandbox=${SANDBOX_MODE}`;
-  console.log(`[${JUDGE_ID}] LiteOJ judge worker started. Backend=${BACKEND_URL}, ${executorInfo}`);
+  console.log(`[${JUDGE_ID}] LiteOJ judge worker started. Backend=${BACKEND_URL}, executor=go-judge, goJudge=${GO_JUDGE_URL}`);
   while (true) {
     try {
       const worked = await once();

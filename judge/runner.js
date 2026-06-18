@@ -1,152 +1,99 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { spawn } = require('child_process');
 const languages = require('./languages');
 const { compareOutput } = require('./checker');
-const { sandboxSpec } = require('./sandbox');
 const { createGoJudgeExecution } = require('./go-judge-client');
 
-const MAX_OUTPUT_BYTES = Number(process.env.JUDGE_MAX_OUTPUT_BYTES || 1024 * 1024);
-const JUDGE_EXECUTOR = String(process.env.JUDGE_EXECUTOR || 'local').toLowerCase();
-
-function makeTempDir(submissionId) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `liteoj-${submissionId}-`));
-}
-
-function cleanup(dir) {
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
-}
-
-function normalizeExecutorMode(value) {
-  const mode = String(value || 'local').toLowerCase();
-  return mode === 'gojudge' || mode === 'go-judge' ? 'go-judge' : 'local';
-}
-
-function runProcess(spec, options = {}) {
-  const timeoutMs = options.timeoutMs || spec.timeoutMs || 1000;
-  const input = options.input || '';
-  const cwd = options.cwd || process.cwd();
-  const memoryLimitMb = Math.max(16, Number(options.memoryLimitMb || 128));
-
-  return new Promise((resolve) => {
-    const started = Date.now();
-    let stdout = '';
-    let stderr = '';
-    let outputBytes = 0;
-    let killedByTimeout = false;
-    let outputLimitExceeded = false;
-
-    const command = spec.command;
-    const args = spec.args || [];
-    const child = spawn(command, args, {
-      cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      shell: false,
-      env: { ...process.env, HOME: cwd },
-    });
-
-    function stopChild() {
-      killedByTimeout = true;
-      if (typeof spec.onTimeout === 'function') {
-        try { spec.onTimeout(); } catch (_) {}
-      }
-      child.kill('SIGKILL');
-    }
-
-    const timer = setTimeout(stopChild, timeoutMs);
-
-    child.stdout.on('data', (chunk) => {
-      outputBytes += chunk.length;
-      if (outputBytes > MAX_OUTPUT_BYTES) {
-        outputLimitExceeded = true;
-        if (typeof spec.onTimeout === 'function') {
-          try { spec.onTimeout(); } catch (_) {}
-        }
-        child.kill('SIGKILL');
-        return;
-      }
-      stdout += chunk.toString('utf8');
-    });
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString('utf8');
-      if (stderr.length > MAX_OUTPUT_BYTES) stderr = stderr.slice(0, MAX_OUTPUT_BYTES);
-    });
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      resolve({ code: -1, signal: null, stdout, stderr: String(err.message), timeMs: Date.now() - started, timeout: false, outputLimitExceeded });
-    });
-    child.on('close', (code, signal) => {
-      clearTimeout(timer);
-      resolve({ code, signal, stdout, stderr, timeMs: Date.now() - started, timeout: killedByTimeout, outputLimitExceeded });
-    });
-
-    if (input) child.stdin.write(input);
-    child.stdin.end();
-  });
-}
-
-function createLocalExecution() {
-  return {
-    compile: (compileSpec, options = {}) => runProcess(
-      sandboxSpec(compileSpec, { cwd: options.cwd, memoryLimitMb: options.memoryLimitMb, phase: 'compile' }),
-      options,
-    ),
-    run: (runSpec, options = {}) => runProcess(
-      sandboxSpec(runSpec, { cwd: options.cwd, memoryLimitMb: options.memoryLimitMb, phase: 'run' }),
-      options,
-    ),
-    cleanup: async () => {},
-  };
-}
-
-function createExecution(language, task) {
-  if (normalizeExecutorMode(JUDGE_EXECUTOR) === 'go-judge') return createGoJudgeExecution(language, task);
-  return createLocalExecution();
-}
-
-function normalizeScoringMode(value) {
-  return String(value || 'oi') === 'acm' ? 'acm' : 'oi';
-}
-
-function applyScoring(details, scoringMode = 'oi') {
-  const mode = normalizeScoringMode(scoringMode);
+function applyScoring(details) {
   const totalPossible = details.reduce((sum, item) => sum + (Number(item.rawScore) || 0), 0);
   const allAccepted = details.length > 0 && details.every((item) => item.status === 'Accepted');
   const firstFailure = details.find((item) => item.status !== 'Accepted');
-  let totalScore = 0;
 
-  if (mode === 'acm') {
-    totalScore = allAccepted ? totalPossible : 0;
-    details.forEach((item) => { item.score = allAccepted && item.status === 'Accepted' ? Number(item.rawScore) || 0 : 0; });
-  } else {
-    const hasSubtasks = details.some((item) => item.subtask);
-    if (hasSubtasks) {
-      const groups = new Map();
-      for (const item of details) {
-        const key = item.subtask ? `subtask:${item.subtask}` : `case:${item.caseId}`;
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(item);
+  const groups = new Map();
+  for (const item of details) {
+    if (!item.subtask) {
+      item.score = item.status === 'Accepted' ? Number(item.rawScore) || 0 : 0;
+      continue;
+    }
+    if (!groups.has(item.subtask)) groups.set(item.subtask, []);
+    groups.get(item.subtask).push(item);
+  }
+
+  for (const group of groups.values()) {
+    const groupAccepted = group.every((item) => item.status === 'Accepted');
+    const groupScore = group.reduce((sum, item) => sum + (Number(item.rawScore) || 0), 0);
+    let scoreAssigned = false;
+    for (const item of group) {
+      if (groupAccepted && !scoreAssigned) {
+        item.score = groupScore;
+        scoreAssigned = true;
+      } else {
+        item.score = 0;
       }
-      for (const group of groups.values()) {
-        const groupAccepted = group.every((item) => item.status === 'Accepted');
-        for (const item of group) {
-          item.score = groupAccepted && item.status === 'Accepted' ? Number(item.rawScore) || 0 : 0;
-          if (!groupAccepted && item.status === 'Accepted' && item.subtask) item.message = 'subtask contains failed test cases';
-        }
-      }
-      totalScore = details.reduce((sum, item) => sum + (Number(item.score) || 0), 0);
-    } else {
-      for (const item of details) item.score = item.status === 'Accepted' ? Number(item.rawScore) || 0 : 0;
-      totalScore = details.reduce((sum, item) => sum + (Number(item.score) || 0), 0);
+      if (!groupAccepted && item.status === 'Accepted') item.message = 'subtask contains failed test cases';
     }
   }
 
+  const totalScore = details.reduce((sum, item) => sum + (Number(item.score) || 0), 0);
   const status = allAccepted
     ? 'Accepted'
     : (totalScore > 0 ? 'Partially Accepted' : (firstFailure?.status || 'Wrong Answer'));
   details.forEach((item) => { delete item.rawScore; });
   return { status, score: totalScore, details, totalPossible };
+}
+
+function runResultToCase(runRes, task, test) {
+  let caseStatus = 'Accepted';
+  let message = '';
+  if (runRes.timeout) {
+    caseStatus = 'Time Limit Exceeded';
+    message = 'program timed out';
+  } else if (runRes.memoryLimitExceeded) {
+    caseStatus = 'Memory Limit Exceeded';
+    message = 'memory limit exceeded';
+  } else if (runRes.outputLimitExceeded) {
+    caseStatus = 'Output Limit Exceeded';
+    message = 'output is too large';
+  } else if (runRes.systemError) {
+    caseStatus = 'System Error';
+    message = (runRes.stderr || runRes.stdout || 'judge execution system error').slice(0, 1000);
+  } else if (runRes.code !== 0) {
+    caseStatus = 'Runtime Error';
+    message = (runRes.stderr || `exit code ${runRes.code}, signal ${runRes.signal || ''}`).slice(0, 1000);
+  } else if (!compareOutput(runRes.stdout, test.output, {
+    mode: task.problem.checkerMode || 'standard',
+    tolerance: task.problem.checkerTolerance,
+  })) {
+    caseStatus = 'Wrong Answer';
+    message = 'output differs from expected answer';
+  }
+
+  return {
+    caseId: test.id,
+    subtask: test.subtask || '',
+    sort: test.sort,
+    status: caseStatus,
+    score: 0,
+    rawScore: Number(test.score) || 0,
+    timeMs: runRes.timeMs,
+    memoryKb: runRes.memoryKb || 0,
+    message,
+  };
+}
+
+function shouldStopJudging(caseStatus) {
+  if (caseStatus === 'Accepted') return false;
+  return caseStatus === 'Time Limit Exceeded'
+    || caseStatus === 'Memory Limit Exceeded'
+    || caseStatus === 'Output Limit Exceeded'
+    || caseStatus === 'System Error';
+}
+
+function stoppedByLimit(details) {
+  return details.find((item) => [
+    'Time Limit Exceeded',
+    'Memory Limit Exceeded',
+    'Output Limit Exceeded',
+    'System Error',
+  ].includes(item.status))?.status || '';
 }
 
 async function judgeTask(task) {
@@ -155,16 +102,12 @@ async function judgeTask(task) {
     return { status: 'System Error', score: 0, message: `Unsupported language: ${task.submission.language}`, details: [] };
   }
 
-  const workdir = makeTempDir(task.id);
-  const sourcePath = path.join(workdir, language.source);
-  fs.writeFileSync(sourcePath, task.submission.code, 'utf8');
-
   let execution = null;
   try {
-    execution = createExecution(language, task);
+    execution = createGoJudgeExecution(language, task);
     if (language.compile) {
-      const compileSpec = language.compile(workdir, { optimize: task.submission.optimize !== false });
-      const compileRes = await execution.compile(compileSpec, { cwd: workdir, timeoutMs: compileSpec.timeoutMs || 10000, memoryLimitMb: 512 });
+      const compileSpec = language.compile('', { optimize: task.submission.optimize !== false });
+      const compileRes = await execution.compile(compileSpec, { timeoutMs: compileSpec.timeoutMs || 10000, memoryLimitMb: 512 });
       if (compileRes.systemError) {
         return {
           status: 'System Error',
@@ -196,63 +139,29 @@ async function judgeTask(task) {
     }
 
     for (const test of cases) {
-      const runRes = await execution.run(language.run(workdir), {
-        cwd: workdir,
+      const timeoutMs = Number(task.problem.timeLimit || 1000);
+      const runRes = await execution.run(language.run(''), {
         input: test.input,
-        timeoutMs: Number(task.problem.timeLimit || 1000) + 200,
+        timeoutMs,
         memoryLimitMb: task.problem.memoryLimit,
       });
       maxTime = Math.max(maxTime, runRes.timeMs);
       maxMemory = Math.max(maxMemory, runRes.memoryKb || 0);
 
-      let caseStatus = 'Accepted';
-      let message = '';
-      if (runRes.timeout) {
-        caseStatus = 'Time Limit Exceeded';
-        message = 'program timed out';
-      } else if (runRes.memoryLimitExceeded) {
-        caseStatus = 'Memory Limit Exceeded';
-        message = 'memory limit exceeded';
-      } else if (runRes.outputLimitExceeded) {
-        caseStatus = 'Output Limit Exceeded';
-        message = 'output is too large';
-      } else if (runRes.systemError) {
-        caseStatus = 'System Error';
-        message = (runRes.stderr || runRes.stdout || 'judge execution system error').slice(0, 1000);
-      } else if (runRes.code !== 0) {
-        caseStatus = 'Runtime Error';
-        message = (runRes.stderr || `exit code ${runRes.code}, signal ${runRes.signal || ''}`).slice(0, 1000);
-      } else if (!compareOutput(runRes.stdout, test.output, {
-        mode: task.problem.checkerMode || 'standard',
-        tolerance: task.problem.checkerTolerance,
-      })) {
-        caseStatus = 'Wrong Answer';
-        message = 'output differs from expected answer';
-      }
-
-      details.push({
-        caseId: test.id,
-        subtask: test.subtask || '',
-        sort: test.sort,
-        status: caseStatus,
-        score: 0,
-        rawScore: Number(test.score) || 0,
-        timeMs: runRes.timeMs,
-        memoryKb: runRes.memoryKb || 0,
-        message,
-      });
+      const detail = runResultToCase(runRes, task, test);
+      details.push(detail);
+      if (shouldStopJudging(detail.status)) break;
     }
 
-    const scored = applyScoring(details, task.problem.scoringMode || 'oi');
-    return { status: scored.status, score: scored.score, timeMs: maxTime, memoryKb: maxMemory, message: '', details: scored.details };
+    const scored = applyScoring(details);
+    return { status: stoppedByLimit(scored.details) || scored.status, score: scored.score, timeMs: maxTime, memoryKb: maxMemory, message: '', details: scored.details };
   } catch (err) {
     return { status: 'System Error', score: 0, message: String(err.stack || err.message), details: [] };
   } finally {
     if (execution && typeof execution.cleanup === 'function') {
       try { await execution.cleanup(); } catch (_) {}
     }
-    cleanup(workdir);
   }
 }
 
-module.exports = { judgeTask, runProcess, applyScoring, createExecution, normalizeExecutorMode };
+module.exports = { judgeTask, applyScoring };

@@ -15,7 +15,6 @@ const {
 const {
   boolToInt,
   parseBoolean,
-  normalizeScoringMode,
   normalizeCheckerMode,
   normalizeCheckerTolerance,
 } = require('../problem-config');
@@ -55,6 +54,41 @@ function clearProblemCases(problemId) {
   for (const name of fs.readdirSync(dir)) fs.rmSync(path.join(dir, name), { force: true, recursive: true });
 }
 
+function caseScore(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, n) : 0;
+}
+
+function subtaskScore(problemId, subtask) {
+  const name = sanitizeSubtaskName(subtask);
+  if (!name) return 0;
+  const row = db.prepare('SELECT COALESCE(SUM(score), 0) AS score FROM problem_cases WHERE problem_id = ? AND subtask = ?')
+    .get(problemId, name);
+  return caseScore(row?.score);
+}
+
+function rebalanceSubtaskScores(problemId, subtask, preferredCaseId = null, score = null) {
+  const name = sanitizeSubtaskName(subtask);
+  if (!name) return;
+  const rows = db.prepare('SELECT id, score FROM problem_cases WHERE problem_id = ? AND subtask = ? ORDER BY sort, id').all(problemId, name);
+  if (!rows.length) return;
+  const groupScore = score === null ? rows.reduce((sum, row) => sum + caseScore(row.score), 0) : caseScore(score);
+  const preferred = preferredCaseId && rows.some((row) => row.id === Number(preferredCaseId)) ? Number(preferredCaseId) : rows[0].id;
+  const update = db.prepare('UPDATE problem_cases SET score = ? WHERE id = ?');
+  for (const row of rows) update.run(row.id === preferred ? groupScore : 0, row.id);
+}
+
+function rebalanceAllSubtasks(problemId) {
+  const rows = db.prepare("SELECT DISTINCT subtask FROM problem_cases WHERE problem_id = ? AND subtask <> ''").all(problemId);
+  for (const row of rows) rebalanceSubtaskScores(problemId, row.subtask);
+}
+
+function caseWithSubtaskScore(problemId, row) {
+  const item = readCaseContent(row);
+  if (item.subtask) item.subtaskScore = subtaskScore(problemId, item.subtask);
+  return item;
+}
+
 function validateProblemBody(body, existing = null) {
   const title = String(body.title ?? existing?.title ?? '').trim();
   if (!title) throw Object.assign(new Error('题目标题不能为空'), { status: 400 });
@@ -66,7 +100,6 @@ function validateProblemBody(body, existing = null) {
   const timeLimit = Math.max(100, Number(body.timeLimit ?? existing?.time_limit ?? 1000) || 1000);
   const memoryLimit = Math.max(16, Number(body.memoryLimit ?? existing?.memory_limit ?? 128) || 128);
   const difficulty = normalizeDifficulty(body.difficulty ?? existing?.difficulty ?? 'unrated');
-  const scoringMode = normalizeScoringMode(body.scoringMode ?? existing?.scoring_mode ?? 'oi');
   const checkerMode = normalizeCheckerMode(body.checkerMode ?? existing?.checker_mode ?? 'standard');
   const checkerTolerance = normalizeCheckerTolerance(body.checkerTolerance ?? existing?.checker_tolerance ?? 0.000001);
   return {
@@ -76,7 +109,6 @@ function validateProblemBody(body, existing = null) {
     difficulty,
     timeLimit,
     memoryLimit,
-    scoringMode,
     checkerMode,
     checkerTolerance,
     isPublic: body.isPublic === undefined ? Boolean(existing?.is_public ?? true) : parseBoolean(body.isPublic, true),
@@ -155,8 +187,8 @@ router.post('/', requireAdmin, (req, res, next) => {
     if (!id) id = nextProblemId();
     const data = validateProblemBody(body);
     db.prepare(`INSERT INTO problems
-      (id, title, description, tags_json, difficulty, time_limit, memory_limit, scoring_mode, checker_mode, checker_tolerance, is_public, created_by, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(
+      (id, title, description, tags_json, difficulty, time_limit, memory_limit, checker_mode, checker_tolerance, is_public, created_by, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(
       id,
       data.title,
       data.description,
@@ -164,7 +196,6 @@ router.post('/', requireAdmin, (req, res, next) => {
       data.difficulty,
       data.timeLimit,
       data.memoryLimit,
-      data.scoringMode,
       data.checkerMode,
       data.checkerTolerance,
       boolToInt(data.isPublic),
@@ -220,7 +251,7 @@ router.put('/:id', requireAdmin, (req, res, next) => {
     const data = validateProblemBody(req.body || {}, existing);
     db.prepare(`UPDATE problems SET
       title = ?, description = ?, tags_json = ?, difficulty = ?, time_limit = ?, memory_limit = ?,
-      scoring_mode = ?, checker_mode = ?, checker_tolerance = ?, is_public = ?, updated_at = CURRENT_TIMESTAMP
+      checker_mode = ?, checker_tolerance = ?, is_public = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?`).run(
       data.title,
       data.description,
@@ -228,7 +259,6 @@ router.put('/:id', requireAdmin, (req, res, next) => {
       data.difficulty,
       data.timeLimit,
       data.memoryLimit,
-      data.scoringMode,
       data.checkerMode,
       data.checkerTolerance,
       boolToInt(data.isPublic),
@@ -265,8 +295,8 @@ router.post('/:id/clone', requireAdmin, (req, res, next) => {
     const isPublic = parseBoolean(req.body.isPublic, false);
     const tx = db.transaction(() => {
       db.prepare(`INSERT INTO problems
-        (id, title, description, tags_json, difficulty, time_limit, memory_limit, scoring_mode, checker_mode, checker_tolerance, is_public, created_by, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(
+        (id, title, description, tags_json, difficulty, time_limit, memory_limit, checker_mode, checker_tolerance, is_public, created_by, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(
         toId,
         cloneTitle,
         copyAttachmentsAndRewriteDescription(fromId, toId, row.description || ''),
@@ -274,7 +304,6 @@ router.post('/:id/clone', requireAdmin, (req, res, next) => {
         normalizeDifficulty(row.difficulty),
         row.time_limit,
         row.memory_limit,
-        normalizeScoringMode(row.scoring_mode),
         normalizeCheckerMode(row.checker_mode),
         normalizeCheckerTolerance(row.checker_tolerance),
         boolToInt(isPublic),
@@ -292,6 +321,7 @@ router.post('/:id/clone', requireAdmin, (req, res, next) => {
         db.prepare('INSERT INTO problem_cases (problem_id, input_path, output_path, subtask, score, sort) VALUES (?, ?, ?, ?, ?, ?)')
           .run(toId, caseRelativePath(toId, inputFile), caseRelativePath(toId, outputFile), c.subtask || '', c.score, c.sort);
       }
+      rebalanceAllSubtasks(toId);
     });
     tx();
     res.json({ problem: problemFromRow(db.prepare('SELECT * FROM problems WHERE id = ?').get(toId)) });
@@ -359,7 +389,7 @@ router.get('/:id/cases/:caseId', requireAdmin, (req, res, next) => {
     const caseId = Number(req.params.caseId);
     const row = db.prepare('SELECT * FROM problem_cases WHERE id = ? AND problem_id = ?').get(caseId, problemId);
     if (!row) return res.status(404).json({ error: '测试点不存在' });
-    const item = req.query.content === '1' ? readCaseContent(row) : caseFromRow(row);
+    const item = req.query.content === '1' ? caseWithSubtaskScore(problemId, row) : caseFromRow(row);
     return res.json({ case: item });
   } catch (err) { return sendRouteError(res, err, next); }
 });
@@ -402,8 +432,22 @@ router.post('/:id/cases/zip', requireAdmin, upload.single('file'), (req, res, ne
 
     const dir = ensureProblemDir(problemId);
     const startSort = replace ? 1 : (db.prepare('SELECT COALESCE(MAX(sort), 0) + 1 AS s FROM problem_cases WHERE problem_id = ?').get(problemId).s || 1);
-    const baseScore = autoScore ? Math.floor(100 / pairs.length) : 0;
-    const remainder = autoScore ? 100 - baseScore * pairs.length : 0;
+    const scoreUnits = [];
+    const seenSubtasks = new Set();
+    pairs.forEach((item, idx) => {
+      if (item.subtask) {
+        if (!seenSubtasks.has(item.subtask)) {
+          seenSubtasks.add(item.subtask);
+          scoreUnits.push({ type: 'subtask', key: item.subtask });
+        }
+      } else {
+        scoreUnits.push({ type: 'case', key: String(idx) });
+      }
+    });
+    const baseScore = autoScore ? Math.floor(100 / scoreUnits.length) : 0;
+    const remainder = autoScore ? 100 - baseScore * scoreUnits.length : 0;
+    const unitScores = new Map(scoreUnits.map((unit, idx) => [`${unit.type}:${unit.key}`, baseScore + (idx === scoreUnits.length - 1 ? remainder : 0)]));
+    const scoredSubtasks = new Set();
     const tx = db.transaction(() => {
       if (replace) clearProblemCases(problemId);
       pairs.forEach((item, idx) => {
@@ -413,7 +457,13 @@ router.post('/:id/cases/zip', requireAdmin, upload.single('file'), (req, res, ne
         const outputFile = `${sort}_${safeStem}.out`;
         fs.writeFileSync(path.join(dir, inputFile), item.input);
         fs.writeFileSync(path.join(dir, outputFile), item.output);
-        const score = autoScore ? baseScore + (idx === pairs.length - 1 ? remainder : 0) : 0;
+        let score = 0;
+        if (autoScore && item.subtask) {
+          score = scoredSubtasks.has(item.subtask) ? 0 : unitScores.get(`subtask:${item.subtask}`) || 0;
+          scoredSubtasks.add(item.subtask);
+        } else if (autoScore) {
+          score = unitScores.get(`case:${idx}`) || 0;
+        }
         db.prepare('INSERT INTO problem_cases (problem_id, input_path, output_path, subtask, score, sort) VALUES (?, ?, ?, ?, ?, ?)')
           .run(problemId, caseRelativePath(problemId, inputFile), caseRelativePath(problemId, outputFile), item.subtask || '', score, sort);
       });
@@ -431,7 +481,9 @@ router.post('/:id/cases', requireAdmin, (req, res, next) => {
     const input = String(req.body.input ?? '');
     const output = String(req.body.output ?? '');
     const subtask = sanitizeSubtaskName(req.body.subtask);
-    const score = Number(req.body.score) || 0;
+    const existingSubtaskScore = subtask ? subtaskScore(problemId, subtask) : 0;
+    const requestedScore = caseScore(req.body.score);
+    const score = subtask ? (requestedScore || existingSubtaskScore) : requestedScore;
     const nextSort = Number(req.body.sort) || (db.prepare('SELECT COALESCE(MAX(sort), 0) + 1 AS s FROM problem_cases WHERE problem_id = ?').get(problemId).s || 1);
     const dir = ensureProblemDir(problemId);
     const inputFile = `${nextSort}.in`;
@@ -440,6 +492,7 @@ router.post('/:id/cases', requireAdmin, (req, res, next) => {
     fs.writeFileSync(path.join(dir, outputFile), output);
     const info = db.prepare('INSERT INTO problem_cases (problem_id, input_path, output_path, subtask, score, sort) VALUES (?, ?, ?, ?, ?, ?)')
       .run(problemId, caseRelativePath(problemId, inputFile), caseRelativePath(problemId, outputFile), subtask, score, nextSort);
+    if (subtask) rebalanceSubtaskScores(problemId, subtask, info.lastInsertRowid, score);
     res.json({ case: { id: info.lastInsertRowid, problemId, subtask, score, sort: nextSort } });
   } catch (err) { return sendRouteError(res, err, next); }
 });
@@ -450,13 +503,17 @@ router.put('/:id/cases/:caseId', requireAdmin, (req, res, next) => {
     const caseId = Number(req.params.caseId);
     const row = db.prepare('SELECT * FROM problem_cases WHERE id = ? AND problem_id = ?').get(caseId, problemId);
     if (!row) return res.status(404).json({ error: '测试点不存在' });
-    const score = Number(req.body.score ?? row.score) || 0;
+    const oldSubtask = row.subtask || '';
     const sort = Number(req.body.sort ?? row.sort) || row.sort;
     const subtask = req.body.subtask === undefined ? (row.subtask || '') : sanitizeSubtaskName(req.body.subtask);
+    const existingGroupScore = subtask ? subtaskScore(problemId, subtask) : 0;
+    const score = caseScore(req.body.score ?? (subtask ? existingGroupScore : row.score));
     if (req.body.input !== undefined) fs.writeFileSync(absoluteDataPath(row.input_path), String(req.body.input));
     if (req.body.output !== undefined) fs.writeFileSync(absoluteDataPath(row.output_path), String(req.body.output));
-    db.prepare('UPDATE problem_cases SET subtask = ?, score = ?, sort = ? WHERE id = ?').run(subtask, score, sort, caseId);
-    res.json({ case: readCaseContent(db.prepare('SELECT * FROM problem_cases WHERE id = ?').get(caseId)) });
+    db.prepare('UPDATE problem_cases SET subtask = ?, score = ?, sort = ? WHERE id = ?').run(subtask, subtask ? 0 : score, sort, caseId);
+    if (oldSubtask && oldSubtask !== subtask) rebalanceSubtaskScores(problemId, oldSubtask);
+    if (subtask) rebalanceSubtaskScores(problemId, subtask, caseId, score);
+    res.json({ case: caseWithSubtaskScore(problemId, db.prepare('SELECT * FROM problem_cases WHERE id = ?').get(caseId)) });
   } catch (err) { return sendRouteError(res, err, next); }
 });
 
@@ -466,7 +523,9 @@ router.delete('/:id/cases/:caseId', requireAdmin, (req, res, next) => {
     const caseId = Number(req.params.caseId);
     const row = db.prepare('SELECT * FROM problem_cases WHERE id = ? AND problem_id = ?').get(caseId, problemId);
     if (!row) return res.status(404).json({ error: '测试点不存在' });
+    const oldSubtaskScore = row.subtask ? subtaskScore(problemId, row.subtask) : 0;
     db.prepare('DELETE FROM problem_cases WHERE id = ?').run(caseId);
+    if (row.subtask) rebalanceSubtaskScores(problemId, row.subtask, null, oldSubtaskScore);
     fs.rmSync(absoluteDataPath(row.input_path), { force: true });
     fs.rmSync(absoluteDataPath(row.output_path), { force: true });
     res.json({ ok: true });
@@ -491,8 +550,8 @@ router.post('/:id/submit', requireLogin, (req, res, next) => {
     if (!problem.is_public && req.user.role !== 'admin') return res.status(403).json({ error: '题目未公开' });
     const language = String(req.body.language || '').trim();
     const code = String(req.body.code || '');
-    const optimize = req.body.o2 === undefined ? true : parseBoolean(req.body.o2, true);
     if (!['cpp11', 'cpp14', 'cpp17', 'c', 'python'].includes(language)) return res.status(400).json({ error: '不支持的语言' });
+    const optimize = ['cpp11', 'cpp14', 'cpp17'].includes(language) && (req.body.o2 === undefined ? true : parseBoolean(req.body.o2, true));
     if (!code.trim()) return res.status(400).json({ error: '代码不能为空' });
     const info = db.prepare(`INSERT INTO submissions (user_id, problem_id, language, code, optimize, status)
       VALUES (?, ?, ?, ?, ?, 'Waiting')`).run(req.user.id, problemId, language, code, boolToInt(optimize));

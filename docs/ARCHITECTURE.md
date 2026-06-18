@@ -97,7 +97,6 @@ tags_json
 difficulty
 time_limit
 memory_limit
-scoring_mode
 checker_mode
 checker_tolerance
 is_public
@@ -194,26 +193,24 @@ POST /api/problems/:id/cases/zip
 6. 写入 `data/problems/<id>/testdata/`；
 7. 同步写入 `problem_cases`；
 8. 根据参数覆盖旧数据或追加数据；
-9. 可自动平均分配 100 分。
+9. 可按测试点或子任务自动分配 100 分。
 
 ## 7. Judge 设计
 
 当前 judge 有两层：
 
 ```text
-JUDGE_EXECUTOR=go-judge: 生产推荐，worker 通过 REST 调用 go-judge /run
-JUDGE_EXECUTOR=local: 开发 fallback，继续使用 JUDGE_SANDBOX=host/docker
+GO_JUDGE_URL=http://127.0.0.1:5050
 ```
 
-`go-judge` 模式保留 LiteOJ 的任务领取、评分和 checker 逻辑，只替换底层编译/运行执行器。公网同机部署时，`start.sh` 会让 Web 跑在 `app` 容器中、go-judge 跑在只绑定 `127.0.0.1` 的 `liteoj-go-judge` 容器中，judge worker 跑在宿主机上。更高安全要求时仍建议把 judge worker 或 go-judge 拆到独立主机/隔离 VM，并结合整体网络边界评估。
+LiteOJ 固定通过 go-judge 编译和运行用户代码，同时保留自身的任务领取、评分和 checker 逻辑。公网同机部署时，`start.sh` 会让 Web 跑在 `app` 容器中、go-judge 跑在只绑定 `127.0.0.1` 的 `liteoj-go-judge` 容器中，judge worker 跑在宿主机上。更高安全要求时仍建议把 judge worker 或 go-judge 拆到独立主机/隔离 VM，并结合整体网络边界评估。
 
-`docker-compose.yml` 中的 `judge` 服务放在 `container-judge` profile 下，启用时同样默认调用 Compose 内的 go-judge 服务；该 profile 仅作为本地或可信内网的简化部署方式，不作为公网陌生提交的首选路径。
+`docker-compose.yml` 中的 `judge` 服务放在 `container-judge` profile 下，启用时同样调用 Compose 内的 go-judge 服务；该 profile 仅作为本地或可信内网的简化部署方式，不作为公网陌生提交的首选路径。
 
 评测结算支持：
 
 ```text
-OI 按点累计
-ACM 全过得分
+普通测试点通过即得分
 子任务整组得分
 标准比较 / 忽略空白 / 大小写不敏感 / 浮点误差
 ```

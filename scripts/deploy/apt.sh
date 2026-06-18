@@ -61,13 +61,12 @@ apt_update() {
 
 install_basic_tools() {
   local missing=()
-  for tool in ca-certificates curl tar xz; do
-    if ! have "$tool"; then
-      missing+=("$tool")
-    fi
-  done
+  [ -s /etc/ssl/certs/ca-certificates.crt ] || missing+=("ca-certificates")
+  have curl || missing+=("curl")
+  have tar || missing+=("tar")
+  have xz || missing+=("xz-utils")
   [ "${#missing[@]}" -eq 0 ] && return 0
-  have apt-get || die "Missing tools (${missing[*]}), and apt-get is unavailable."
+  have apt-get || die "Missing packages (${missing[*]}), and apt-get is unavailable."
   require_sudo
   apt_update
   "${SUDO[@]}" apt-get install -y ca-certificates curl tar xz-utils

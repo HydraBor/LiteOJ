@@ -104,18 +104,6 @@ ensure_go_judge_port_available() {
   die "go-judge port $requested is already in use and no free port was found before $end. Set GO_JUDGE_PORT in .env manually."
 }
 
-docker_available_for_user() {
-  docker info >/dev/null 2>&1
-}
-
-docker_available_with_sg() {
-  [ "$(id -u)" -ne 0 ] || return 1
-  have sg || return 1
-  getent group docker >/dev/null 2>&1 || return 1
-  getent group docker | awk -F: -v user="$USER" '{ split($4, users, ","); for (i in users) if (users[i] == user) found=1 } END { exit found ? 0 : 1 }' || return 1
-  sg docker -c 'docker info >/dev/null 2>&1'
-}
-
 judge_is_running() {
   [ -f "$JUDGE_PID_FILE" ] || return 1
   local pid
@@ -146,28 +134,14 @@ start_judge() {
   inner+=" JUDGE_ID=$(quote "${JUDGE_ID:-same-server-judge-1}")"
   inner+=" JUDGE_POLL_INTERVAL_MS=$(quote "${JUDGE_POLL_INTERVAL_MS:-2000}")"
   inner+=" JUDGE_MAX_OUTPUT_BYTES=$(quote "${JUDGE_MAX_OUTPUT_BYTES:-1048576}")"
-  inner+=" JUDGE_EXECUTOR=$(quote "${JUDGE_EXECUTOR:-go-judge}")"
   inner+=" GO_JUDGE_URL=$(quote "${GO_JUDGE_URL:-http://127.0.0.1:${GO_JUDGE_PORT:-5050}}")"
-  inner+=" JUDGE_SANDBOX=docker"
-  inner+=" JUDGE_SANDBOX_IMAGE=$(quote "${JUDGE_SANDBOX_IMAGE:-liteoj:latest}")"
-  inner+=" JUDGE_SANDBOX_CPUS=$(quote "${JUDGE_SANDBOX_CPUS:-1}")"
-  inner+=" JUDGE_PROCESS_LIMIT=$(quote "${JUDGE_PROCESS_LIMIT:-64}")"
-  inner+=" JUDGE_FILE_LIMIT_KB=$(quote "${JUDGE_FILE_LIMIT_KB:-65536}")"
+  inner+=" GO_JUDGE_PROCESS_LIMIT=$(quote "${GO_JUDGE_PROCESS_LIMIT:-64}")"
   inner+=" PATH=$(quote "$path_value")"
   inner+=" $(quote "$node_bin") judge/worker.js"
 
-  if [ "${JUDGE_EXECUTOR:-go-judge}" = "go-judge" ] || [ "${JUDGE_EXECUTOR:-go-judge}" = "gojudge" ]; then
-    cmd="$inner"
-  elif docker_available_for_user; then
-    cmd="$inner"
-  elif docker_available_with_sg; then
-    log "Re-entering docker group for host judge"
-    cmd="sg docker -c $(quote "$inner")"
-  else
-    die "The current user cannot run docker without sudo. Log out and back in after Docker group setup, or run: sudo usermod -aG docker $USER"
-  fi
+  cmd="$inner"
 
-  log "Starting host judge worker with ${JUDGE_EXECUTOR:-go-judge} executor"
+  log "Starting host judge worker with go-judge executor"
   if have setsid; then
     setsid bash -lc "$cmd" >>"$JUDGE_LOG_FILE" 2>&1 &
   else

@@ -1,12 +1,10 @@
-ARG GO_JUDGE_BASE_IMAGE=criyle/go-judge:latest
-FROM ${GO_JUDGE_BASE_IMAGE} AS gojudge
-
 FROM debian:bookworm-slim
 
 WORKDIR /opt
 
 ARG APT_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian
 ARG APT_SECURITY_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian-security
+ARG GO_JUDGE_VERSION=1.12.0
 
 RUN APT_BOOTSTRAP_MIRROR="$(printf '%s' "$APT_MIRROR" | sed 's#^https://#http://#')" \
   && APT_BOOTSTRAP_SECURITY_MIRROR="$(printf '%s' "$APT_SECURITY_MIRROR" | sed 's#^https://#http://#')" \
@@ -22,7 +20,16 @@ RUN APT_BOOTSTRAP_MIRROR="$(printf '%s' "$APT_MIRROR" | sed 's#^https://#http://
   && apt-get install -y --no-install-recommends ca-certificates curl python3 gcc g++ make tini \
   && rm -rf /var/lib/apt/lists/*
 
-COPY --from=gojudge /opt/go-judge /opt/mount.yaml /opt/
+RUN --mount=type=bind,source=.runtime/go-judge/go-judge,target=/tmp/liteoj-go-judge \
+  set -eux; \
+  echo "Using pre-downloaded go-judge binary from build context"; \
+  cp /tmp/liteoj-go-judge /opt/go-judge; \
+  chmod 0755 /opt/go-judge; \
+  /opt/go-judge -version | grep -q "v${GO_JUDGE_VERSION}"; \
+  printf 'judge:x:1536:1536:judge:/w:/bin/sh\n' > /opt/containerPasswd.txt; \
+  : > /opt/dotenv
+
+COPY judge/mount.yaml /opt/mount.yaml
 
 EXPOSE 5050/tcp 5051/tcp 5052/tcp
 ENTRYPOINT ["/usr/bin/tini", "--", "/opt/go-judge"]

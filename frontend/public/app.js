@@ -3,6 +3,8 @@ const app = document.getElementById('app');
 const adminNav = document.getElementById('adminNav');
 const submissionsNav = document.getElementById('submissionsNav');
 const userBox = document.getElementById('userBox');
+let submissionPollTimer = null;
+let loginFailureCount = 0;
 
 async function api(url, options = {}) {
   const res = await fetch(url, {
@@ -197,10 +199,6 @@ function difficultyOptions(selected = '') {
   return LUOGU_DIFFICULTIES.map((d) => `<option value="${d.value}" ${value === d.value ? 'selected' : ''}>${d.label}</option>`).join('');
 }
 
-const SCORING_MODES = [
-  { value: 'oi', label: 'OI 按点累计' },
-  { value: 'acm', label: 'ACM 全过得分' },
-];
 const CHECKER_MODES = [
   { value: 'standard', label: '标准比较' },
   { value: 'ignore_space', label: '忽略空白' },
@@ -213,7 +211,6 @@ function optionFromList(items, selected = '') {
 function labelFromList(items, value, fallback = '默认') {
   return items.find((item) => item.value === value)?.label || fallback;
 }
-function scoringModeLabel(value) { return labelFromList(SCORING_MODES, value || 'oi', 'OI 按点累计'); }
 function checkerModeLabel(value) { return labelFromList(CHECKER_MODES, value || 'standard', '标准比较'); }
 
 const SUBMISSION_LANGUAGES = [
@@ -223,7 +220,10 @@ const SUBMISSION_LANGUAGES = [
   { value: 'c', label: 'C11' },
   { value: 'python', label: 'Python 3' },
 ];
-function languageOptions(selected = 'cpp17') {
+function isCppLanguage(value) {
+  return ['cpp11', 'cpp14', 'cpp17'].includes(String(value || ''));
+}
+function languageOptions(selected = 'cpp14') {
   return SUBMISSION_LANGUAGES.map((lang) => `<option value="${lang.value}" ${selected === lang.value ? 'selected' : ''}>${lang.label}</option>`).join('');
 }
 function languageLabel(value) {
@@ -406,7 +406,26 @@ function enhanceFormAccessibility(root = app) {
     control.setAttribute('aria-label', placeholder || name.replace(/^liteoj-/, '').replace(/-/g, ' '));
   });
 }
-function nav(path) { history.pushState(null, '', path); render(); }
+function clearSubmissionPoll() {
+  if (submissionPollTimer) clearTimeout(submissionPollTimer);
+  submissionPollTimer = null;
+}
+
+function scheduleSubmissionPoll(id) {
+  clearSubmissionPoll();
+  const expectedPath = `/submission/${id}`;
+  submissionPollTimer = setTimeout(() => {
+    submissionPollTimer = null;
+    if (location.pathname !== expectedPath) return;
+    renderSubmission(id).catch(console.error);
+  }, 1800);
+}
+
+function nav(path) {
+  clearSubmissionPoll();
+  history.pushState(null, '', path);
+  render();
+}
 window.nav = nav;
 document.addEventListener('click', (event) => {
   const routeEl = event.target.closest('[data-route]');
@@ -416,7 +435,10 @@ document.addEventListener('click', (event) => {
   event.preventDefault();
   nav(path);
 });
-window.addEventListener('popstate', render);
+window.addEventListener('popstate', () => {
+  clearSubmissionPoll();
+  render();
+});
 
 function setImmersive(on) {
   document.body.classList.toggle('auth-page', Boolean(on));
@@ -450,7 +472,7 @@ function renderError(err) {
 
 function showInlineError(target, err) {
   const box = qs(target);
-  if (box) box.innerHTML = `<div class="error">${esc(err.message || err)}</div>`;
+  if (box) box.innerHTML = `<div class="error" role="alert">${esc(err.message || err)}</div>`;
 }
 function showInlineSuccess(target, message) {
   const box = qs(target);
@@ -484,6 +506,7 @@ function authLayout(type) {
 
 async function renderLogin() {
   setImmersive(true);
+  loginFailureCount = 0;
   app.innerHTML = authLayout('login');
   qs('#loginForm').onsubmit = async (e) => {
     e.preventDefault();
@@ -491,7 +514,13 @@ async function renderLogin() {
       await api('/api/auth/login', { method: 'POST', body: formData(e.target) });
       await refreshMe();
       nav('/');
-    } catch (err) { showInlineError('#authMsg', err); }
+    } catch (err) {
+      loginFailureCount += 1;
+      showInlineError('#authMsg', `${err.message || err}，请检查后重试（第 ${loginFailureCount} 次失败）。`);
+      const passwordInput = qs('[name="password"]', e.target);
+      passwordInput?.focus();
+      passwordInput?.select();
+    }
   };
 }
 
@@ -620,7 +649,7 @@ async function renderProblem(id) {
       <div class="problem-head row space">
         <div class="problem-heading">
           <h1 class="problem-title">${esc(p.id)} ${esc(p.title)}</h1>
-          <p class="problem-meta muted">时间限制：${p.timeLimit} ms　内存限制：${p.memoryLimit} MB　难度：${difficultyBadge(p.difficulty)}　评分：${esc(scoringModeLabel(p.scoringMode))}　比较：${esc(checkerModeLabel(p.checkerMode))}</p>
+          <p class="problem-meta muted">时间限制：${p.timeLimit} ms　内存限制：${p.memoryLimit} MB　难度：${difficultyBadge(p.difficulty)}　计分：测试点/子任务得分　比较：${esc(checkerModeLabel(p.checkerMode))}</p>
         </div>
         ${currentUser?.role === 'admin' ? `<div class="row actions">${routeLink(`/admin/problem/${problemUrl(p.id)}/edit`, '编辑', 'btn')}${routeLink(`/admin/problem/${problemUrl(p.id)}/data`, '测试数据', 'btn')}</div>` : ''}
       </div>
@@ -640,10 +669,23 @@ async function renderProblem(id) {
     ${currentUser?.role === 'admin' ? `<div class="card"><h2>管理信息</h2>${renderCaseTable(p.id, data.cases || [])}<div class="row button-row">${routeLink(`/admin/problem/${problemUrl(p.id)}/data`, '管理测试点', 'btn')}<button type="button" onclick="rejudgeProblem(${jsArg(p.id)})">重测本题</button></div></div>` : ''}`;
   const form = qs('#submitForm');
   if (form) {
+    const languageSelect = qs('[name="language"]', form);
+    const o2Line = qs('.o2-line', form);
+    const o2Input = qs('[name="o2"]', form);
+    const syncO2 = () => {
+      const visible = isCppLanguage(languageSelect?.value);
+      o2Line?.classList.toggle('hidden', !visible);
+      if (o2Input) {
+        o2Input.disabled = !visible;
+        if (!visible) o2Input.checked = false;
+      }
+    };
+    languageSelect?.addEventListener('change', syncO2);
+    syncO2();
     form.onsubmit = async (e) => {
       e.preventDefault();
       const data = formData(e.target);
-      data.o2 = Boolean(e.target.o2?.checked);
+      data.o2 = isCppLanguage(data.language) && Boolean(e.target.o2?.checked);
       const result = await api(problemApi(id, '/submit'), { method: 'POST', body: data });
       nav(`/submission/${result.submissionId}`);
     };
@@ -652,8 +694,13 @@ async function renderProblem(id) {
 
 function renderCaseTable(_problemId, cases) {
   if (!cases.length) return '<p class="muted">暂无测试点。</p>';
-  return `<table><thead><tr><th>#</th><th>子任务</th><th>分数</th><th>输入文件</th><th>输出文件</th></tr></thead><tbody>${cases.map((c) => `
-    <tr><td>${c.sort}</td><td>${c.subtask ? esc(c.subtask) : '<span class="muted">--</span>'}</td><td>${c.score}</td><td>${esc(c.inputPath)}</td><td>${esc(c.outputPath)}</td></tr>`).join('')}</tbody></table>`;
+  const groups = groupCasesBySubtask(cases);
+  const groupScore = new Map(groups.map((group) => [group.subtask || '', group.score]));
+  const firstInGroup = new Set(groups.map((group) => group.cases[0]?.id).filter(Boolean));
+  return `<table><thead><tr><th>#</th><th>子任务</th><th>分值</th><th>输入文件</th><th>输出文件</th></tr></thead><tbody>${cases.map((c) => {
+    const scoreText = c.subtask ? (firstInGroup.has(c.id) ? `${formatScore(groupScore.get(c.subtask) || 0)}（子任务）` : '随子任务') : formatScore(c.score);
+    return `<tr><td>${c.sort}</td><td>${c.subtask ? esc(c.subtask) : '<span class="muted">--</span>'}</td><td>${esc(scoreText)}</td><td>${esc(c.inputPath)}</td><td>${esc(c.outputPath)}</td></tr>`;
+  }).join('')}</tbody></table>`;
 }
 
 function caseFileName(value) {
@@ -690,6 +737,7 @@ function groupCasesBySubtask(cases = []) {
 function renderCaseGroup(problemId, problem, group, index, hasSubtasks) {
   const title = hasSubtasks ? `子任务 ${index + 1}` : group.title;
   const inheritedLimits = `继承题目限制：${problem.timeLimit || 1000} ms / ${problem.memoryLimit || 128} MB`;
+  const firstCaseId = group.cases[0]?.id;
   return `<section class="case-group-card" data-subtask="${esc(group.subtask)}">
     <div class="case-group-head">
       <div>
@@ -700,12 +748,12 @@ function renderCaseGroup(problemId, problem, group, index, hasSubtasks) {
     </div>
     <div class="case-group-table-wrap">
       <table class="case-group-table">
-        <thead><tr><th>#</th><th>输入文件</th><th>输出文件</th><th>分数</th><th>时间</th><th>内存</th><th>操作</th></tr></thead>
+        <thead><tr><th>#</th><th>输入文件</th><th>输出文件</th><th>分值</th><th>时间</th><th>内存</th><th>操作</th></tr></thead>
         <tbody>${group.cases.map((c) => `<tr>
           <td><span class="case-index">#${esc(c.sort)}</span></td>
           <td><code>${esc(caseFileName(c.inputPath))}</code></td>
           <td><code>${esc(caseFileName(c.outputPath))}</code></td>
-          <td>${esc(formatScore(c.score))}</td>
+          <td>${esc(group.subtask ? (c.id === firstCaseId ? `${formatScore(group.score)}（子任务）` : '随子任务') : formatScore(c.score))}</td>
           <td>${esc(problem.timeLimit || 1000)} ms</td>
           <td>${esc(problem.memoryLimit || 128)} MB</td>
           <td class="table-actions-cell case-row-actions">
@@ -725,7 +773,7 @@ function renderCaseOverview(problemId, problem, cases = []) {
   if (!cases.length) {
     return `<div class="case-empty-state">
       <h3>暂无测试点</h3>
-      <p class="muted">上传 zip 或手动新增测试点后，这里会按子任务分组展示文件、分数和继承的时空限制。</p>
+      <p class="muted">上传 zip 或手动新增测试点后，这里会按子任务分组展示文件、分值和继承的时空限制。</p>
     </div>`;
   }
   const groups = groupCasesBySubtask(cases);
@@ -740,7 +788,7 @@ function renderCaseOverview(problemId, problem, cases = []) {
     </div>
     <div class="case-mode-note">
       <span class="state-pill ${hasSubtasks ? 'state-public' : 'state-none'}">${hasSubtasks ? '子任务整组得分' : '普通测试点'}</span>
-      <p class="muted">${hasSubtasks ? '同一子任务内任意测试点失败时，该子任务内通过的测试点也不会得分。' : '没有设置子任务名时，每个测试点独立计分。'}</p>
+      <p class="muted">${hasSubtasks ? '同一子任务内任意测试点失败时，该子任务不得分；子任务分值只按整组设置。' : '没有设置子任务名时，每个测试点独立计分。'}</p>
     </div>
     <div class="case-group-list">${groups.map((group, index) => renderCaseGroup(problemId, problem, group, index, hasSubtasks)).join('')}</div>
   </div>`;
@@ -775,11 +823,11 @@ async function renderSubmission(id) {
       ${renderDetails(s.details || [])}
       <h3>代码</h3><pre>${esc(s.code)}</pre>
     </div>`;
-  if (['Waiting', 'Judging'].includes(s.status)) setTimeout(() => renderSubmission(id).catch(console.error), 1800);
+  if (['Waiting', 'Judging'].includes(s.status)) scheduleSubmissionPoll(id);
 }
 window.rejudge = async (id) => {
   await api(`/api/submissions/${id}/rejudge`, { method: 'POST', body: {} });
-  renderSubmission(id);
+  if (location.pathname === `/submission/${id}`) renderSubmission(id);
 };
 
 function renderDetails(details) {
@@ -1568,7 +1616,6 @@ function collectProblemForm(form, existingId) {
     difficulty: f.difficulty || 'unrated',
     timeLimit: Number(f.timeLimit) || 1000,
     memoryLimit: Number(f.memoryLimit) || 128,
-    scoringMode: f.scoringMode || 'oi',
     checkerMode: f.checkerMode || 'standard',
     checkerTolerance: Number(f.checkerTolerance) || 0.000001,
     isPublic: Boolean(form.querySelector('[name="isPublic"]')?.checked),
@@ -1605,8 +1652,8 @@ function problemCreateCaseSection() {
     </div>
     <div id="zipCasePanel" class="testcase-panel">
       ${filePicker('zipFile', 'zipCaseFileName', '选择 zip 文件')}
-      <p class="muted upload-help">支持 .zip，自动识别同名 .in + .out/.ans；目录名会作为子任务。</p>
-      <label class="checkbox-line"><input type="checkbox" name="zipAutoScore" checked /> 自动平均分配 100 分</label>
+      <p class="muted upload-help">支持 .zip，自动识别同名 .in + .out/.ans；目录名会作为子任务，同一子任务只设置一个整组分值。</p>
+      <label class="checkbox-line"><input type="checkbox" name="zipAutoScore" checked /> 按测试点/子任务自动分配 100 分</label>
     </div>
     <div id="manualCasePanel" class="testcase-panel hidden">
       <div id="importCasesBox">${importCaseItem('', '', '100')}</div>
@@ -1619,7 +1666,7 @@ async function renderProblemEditor(id) {
   setImmersive(false);
   if (currentUser?.role !== 'admin') return renderLogin();
   const isNew = id === 'new';
-  let p = { id: '', title: '', description: '', tags: [], difficulty: 'beginner', timeLimit: 1000, memoryLimit: 128, scoringMode: 'oi', checkerMode: 'standard', checkerTolerance: 0.000001, isPublic: true };
+  let p = { id: '', title: '', description: '', tags: [], difficulty: 'beginner', timeLimit: 1000, memoryLimit: 128, checkerMode: 'standard', checkerTolerance: 0.000001, isPublic: true };
   if (!isNew) p = (await api(problemApi(id))).problem;
   if (isNew) {
     try { p.id = (await api('/api/problems/next-id')).id; } catch (_) { p.id = ''; }
@@ -1642,8 +1689,7 @@ async function renderProblemEditor(id) {
             <div>${requiredLabel('时间限制 ms')}<input name="timeLimit" value="${esc(p.timeLimit)}" /></div>
             <div>${requiredLabel('内存限制 MB')}<input name="memoryLimit" value="${esc(p.memoryLimit)}" /></div>
           </div>
-          <div class="grid three">
-            <div>${requiredLabel('评分方式')}<select name="scoringMode">${optionFromList(SCORING_MODES, p.scoringMode || 'oi')}</select></div>
+          <div class="grid two">
             <div>${requiredLabel('输出比较')}<select name="checkerMode">${optionFromList(CHECKER_MODES, p.checkerMode || 'standard')}</select></div>
             <div><label>浮点误差</label><input name="checkerTolerance" value="${esc(p.checkerTolerance || 0.000001)}" placeholder="如 0.000001" /></div>
           </div>
@@ -1713,11 +1759,11 @@ async function renderCaseManager(problemId) {
     </div>
     <div class="card">
       <h2>zip 批量上传测试数据</h2>
-      <p class="muted">选择 zip 后会自动识别同名的 <code>.in</code> 与 <code>.out/.ans</code> 文件；zip 子目录会作为子任务名。导入后只展示测试点概要，编辑时再按需读取具体输入输出。</p>
+      <p class="muted">选择 zip 后会自动识别同名的 <code>.in</code> 与 <code>.out/.ans</code> 文件；zip 子目录会作为子任务名。同一子任务只设置一个整组分值。</p>
       <form id="caseZipForm" class="zip-form">
         ${filePicker('file', 'caseZipFileName', '选择 zip 文件')}
         <label class="checkbox-line"><input type="checkbox" name="replace" checked /> 覆盖当前测试点</label>
-        <label class="checkbox-line"><input type="checkbox" name="autoScore" checked /> 自动平均分配 100 分</label>
+        <label class="checkbox-line"><input type="checkbox" name="autoScore" checked /> 按测试点/子任务自动分配 100 分</label>
         <button class="primary">上传并解析</button>
       </form>
       <div id="zipMsg"></div>
@@ -1728,7 +1774,7 @@ async function renderCaseManager(problemId) {
         <div><label>输入数据</label><textarea name="input" class="case-text"></textarea></div>
         <div><label>标准输出</label><textarea name="output" class="case-text"></textarea></div>
         <div><label>子任务</label><input name="subtask" placeholder="可选，如 subtask1" /></div>
-        <div><label>分数</label><input name="score" value="${cases.length ? 0 : 100}" /></div>
+        <div><label>分值</label><input name="score" value="${cases.length ? 0 : 100}" placeholder="填了子任务时表示整组分值" /></div>
         <div><label>排序</label><input name="sort" placeholder="留空自动追加" /></div>
         <p><button class="primary">添加测试点</button></p>
       </form>
@@ -1769,10 +1815,12 @@ async function renderCaseManager(problemId) {
 }
 
 function renderCaseEditorBlock(problemId, c) {
+  const scoreLabel = c.subtask ? '子任务分值' : '测试点分值';
+  const scoreValue = c.subtask ? (c.subtaskScore ?? c.score) : c.score;
   return `<form class="case-edit-form case-block" data-case-id="${esc(c.id)}">
     <div class="row space"><h3>#${esc(c.sort)} 测试点</h3><button type="button" onclick="closeCaseEditor(${jsArg(c.id)})">收起</button></div>
     <div class="grid two"><div><label>输入</label><textarea name="input" class="case-text">${esc(c.input)}</textarea></div><div><label>标准输出</label><textarea name="output" class="case-text">${esc(c.output)}</textarea></div></div>
-    <div class="grid three"><div><label>子任务</label><input name="subtask" value="${esc(c.subtask || '')}" placeholder="可选" /></div><div><label>分数</label><input name="score" value="${esc(c.score)}" /></div><div><label>排序</label><input name="sort" value="${esc(c.sort)}" /></div></div>
+    <div class="grid three"><div><label>子任务</label><input name="subtask" value="${esc(c.subtask || '')}" placeholder="可选" /></div><div><label>${scoreLabel}</label><input name="score" value="${esc(scoreValue)}" /></div><div><label>排序</label><input name="sort" value="${esc(c.sort)}" /></div></div>
     <p><button>保存测试点</button></p>
   </form>`;
 }
@@ -1847,7 +1895,7 @@ function importCaseItem(input = '', output = '', score = '', subtask = '') {
   return `<div class="case-draft-item">
     <div class="row space"><b>测试点</b><button type="button" onclick="this.closest('.case-draft-item').remove(); renumberImportCases();">删除</button></div>
     <div class="grid two"><div><label>输入</label><textarea name="caseInput" class="case-text">${esc(input)}</textarea></div><div><label>标准输出</label><textarea name="caseOutput" class="case-text">${esc(output)}</textarea></div></div>
-    <div class="grid two"><div><label>子任务</label><input name="caseSubtask" value="${esc(subtask)}" placeholder="可选，如 subtask1" /></div><div><label>分数</label><input name="caseScore" value="${esc(score)}" placeholder="留空则为 0" /></div></div>
+    <div class="grid two"><div><label>子任务</label><input name="caseSubtask" value="${esc(subtask)}" placeholder="可选，如 subtask1" /></div><div><label>分值</label><input name="caseScore" value="${esc(score)}" placeholder="填了子任务时表示整组分值" /></div></div>
   </div>`;
 }
 window.renumberImportCases = () => qsa('.case-draft-item b').forEach((x, i) => { x.textContent = `测试点 #${i + 1}`; });

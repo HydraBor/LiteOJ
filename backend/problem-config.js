@@ -1,4 +1,3 @@
-const SCORING_MODES = new Set(['oi', 'acm']);
 const CHECKER_MODES = new Set(['standard', 'ignore_space', 'case_insensitive', 'float']);
 
 function boolToInt(value) {
@@ -9,11 +8,6 @@ function parseBoolean(value, fallback = false) {
   if (value === undefined || value === null) return fallback;
   if (typeof value === 'boolean') return value;
   return ['1', 'true', 'on', 'yes'].includes(String(value).toLowerCase());
-}
-
-function normalizeScoringMode(value, fallback = 'oi') {
-  const mode = String(value || fallback).trim();
-  return SCORING_MODES.has(mode) ? mode : fallback;
 }
 
 function normalizeCheckerMode(value, fallback = 'standard') {
@@ -28,11 +22,9 @@ function normalizeCheckerTolerance(value, fallback = 0.000001) {
 }
 
 module.exports = {
-  SCORING_MODES,
   CHECKER_MODES,
   boolToInt,
   parseBoolean,
-  normalizeScoringMode,
   normalizeCheckerMode,
   normalizeCheckerTolerance,
 };

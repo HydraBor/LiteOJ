@@ -31,18 +31,19 @@ function collector(name, max = MAX_OUTPUT_BYTES) {
 
 function buildLimits(options = {}) {
   const timeoutMs = Number(options.timeoutMs || 1000);
+  const clockTimeoutMs = Number(options.clockTimeoutMs || timeoutMs);
   return {
     cpuLimit: toNs(timeoutMs),
-    clockLimit: toNs(Number(options.clockTimeoutMs || timeoutMs + 1000)),
+    clockLimit: toNs(clockTimeoutMs),
     memoryLimit: toBytes(options.memoryLimitMb || 128),
-    procLimit: Math.max(4, Number(process.env.JUDGE_PROCESS_LIMIT || 64)),
+    procLimit: Math.max(4, Number(process.env.GO_JUDGE_PROCESS_LIMIT || 64)),
   };
 }
 
 class GoJudgeClient {
   constructor(options = {}) {
-    this.baseUrl = normalizeBaseUrl(options.baseUrl || process.env.GO_JUDGE_URL || process.env.JUDGE_GOJUDGE_URL);
-    this.authToken = options.authToken || process.env.GO_JUDGE_TOKEN || process.env.JUDGE_GOJUDGE_TOKEN || '';
+    this.baseUrl = normalizeBaseUrl(options.baseUrl || process.env.GO_JUDGE_URL);
+    this.authToken = options.authToken || process.env.GO_JUDGE_TOKEN || '';
   }
 
   headers() {
@@ -201,7 +202,7 @@ function createGoJudgeExecution(language, task) {
       ...commonCmd(runSpec, {
         input: options.input || '',
         timeoutMs: options.timeoutMs || 1000,
-        clockTimeoutMs: Number(options.timeoutMs || 1000) + 1000,
+        clockTimeoutMs: options.timeoutMs || 1000,
         memoryLimitMb: options.memoryLimitMb || 128,
       }),
       copyIn,

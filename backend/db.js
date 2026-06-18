@@ -29,6 +29,9 @@ function migrate() {
       difficulty TEXT NOT NULL DEFAULT 'unrated',
       time_limit INTEGER NOT NULL DEFAULT 1000,
       memory_limit INTEGER NOT NULL DEFAULT 128,
+      scoring_mode TEXT NOT NULL DEFAULT 'oi',
+      checker_mode TEXT NOT NULL DEFAULT 'standard',
+      checker_tolerance REAL NOT NULL DEFAULT 0.000001,
       is_public INTEGER NOT NULL DEFAULT 1,
       created_by INTEGER,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -41,6 +44,7 @@ function migrate() {
       problem_id TEXT NOT NULL,
       input_path TEXT NOT NULL,
       output_path TEXT NOT NULL,
+      subtask TEXT NOT NULL DEFAULT '',
       score INTEGER NOT NULL DEFAULT 0,
       sort INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -178,6 +182,9 @@ function migrate() {
   ensureColumn('problems', 'difficulty', "TEXT NOT NULL DEFAULT 'unrated'");
   ensureColumn('problems', 'time_limit', 'INTEGER NOT NULL DEFAULT 1000');
   ensureColumn('problems', 'memory_limit', 'INTEGER NOT NULL DEFAULT 128');
+  ensureColumn('problems', 'scoring_mode', "TEXT NOT NULL DEFAULT 'oi'");
+  ensureColumn('problems', 'checker_mode', "TEXT NOT NULL DEFAULT 'standard'");
+  ensureColumn('problems', 'checker_tolerance', 'REAL NOT NULL DEFAULT 0.000001');
   ensureColumn('problems', 'is_public', 'INTEGER NOT NULL DEFAULT 1');
   ensureColumn('problems', 'created_by', 'INTEGER');
   ensureColumn('problems', 'created_at', "TEXT NOT NULL DEFAULT ''");
@@ -185,6 +192,7 @@ function migrate() {
 
   ensureColumn('problem_cases', 'input_path', "TEXT NOT NULL DEFAULT ''");
   ensureColumn('problem_cases', 'output_path', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('problem_cases', 'subtask', "TEXT NOT NULL DEFAULT ''");
   ensureColumn('problem_cases', 'score', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('problem_cases', 'sort', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('problem_cases', 'created_at', "TEXT NOT NULL DEFAULT ''");
@@ -216,6 +224,9 @@ function problemFromRow(row) {
     difficulty: row.difficulty || 'unrated',
     timeLimit: row.time_limit,
     memoryLimit: row.memory_limit,
+    scoringMode: row.scoring_mode || 'oi',
+    checkerMode: row.checker_mode || 'standard',
+    checkerTolerance: Number(row.checker_tolerance || 0.000001),
     isPublic: Boolean(row.is_public),
     createdBy: row.created_by,
     createdAt: row.created_at,
@@ -230,6 +241,7 @@ function caseFromRow(row) {
     problemId: row.problem_id,
     inputPath: row.input_path,
     outputPath: row.output_path,
+    subtask: row.subtask || '',
     score: row.score,
     sort: row.sort,
     createdAt: row.created_at,

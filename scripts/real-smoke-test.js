@@ -74,10 +74,15 @@ async function main() {
     difficulty: 'beginner',
     timeLimit: 1000,
     memoryLimit: 128,
+    scoringMode: 'acm',
+    checkerMode: 'ignore_space',
+    checkerTolerance: 0.000001,
     tags: ['烟测', '加法'],
     isPublic: true,
   });
   assert.strictEqual(created.problem.id, problemId, 'problem create should preserve string id');
+  assert.strictEqual(created.problem.scoringMode, 'acm', 'problem create should save scoring mode');
+  assert.strictEqual(created.problem.checkerMode, 'ignore_space', 'problem create should save checker mode');
 
   const updated = await request('PUT', `/api/problems/${encodeURIComponent(problemId)}`, {
     id: problemId,
@@ -86,31 +91,39 @@ async function main() {
     difficulty: 'popular_minus',
     timeLimit: 1200,
     memoryLimit: 256,
+    scoringMode: 'oi',
+    checkerMode: 'float',
+    checkerTolerance: 0.00001,
     tags: ['烟测', '编辑'],
     isPublic: true,
   });
   assert.strictEqual(updated.problem.title, '烟测编辑题', 'problem edit should update title');
+  assert.strictEqual(updated.problem.scoringMode, 'oi', 'problem edit should update scoring mode');
+  assert.strictEqual(updated.problem.checkerMode, 'float', 'problem edit should update checker mode');
 
   const addedCase = await request('POST', `/api/problems/${encodeURIComponent(problemId)}/cases`, {
-    input: '1 2\n', output: '3\n', score: 100, sort: 1,
+    input: '1 2\n', output: '3\n', subtask: 'sample', score: 100, sort: 1,
   });
   assert(addedCase.case.id, 'manual case create should return a case id');
   let cases = await request('GET', `/api/problems/${encodeURIComponent(problemId)}/cases?content=1`);
   assert.strictEqual(cases.cases.length, 1, 'manual case should be listed');
+  assert.strictEqual(cases.cases[0].subtask, 'sample', 'manual case should preserve subtask');
 
   await request('DELETE', `/api/problems/${encodeURIComponent(problemId)}/cases/${addedCase.case.id}`);
   cases = await request('GET', `/api/problems/${encodeURIComponent(problemId)}/cases`);
   assert.strictEqual(cases.cases.length, 0, 'case delete should remove the case');
 
   const zip = new AdmZip();
-  zip.addFile('1.in', Buffer.from('2 3\n'));
-  zip.addFile('1.out', Buffer.from('5\n'));
+  zip.addFile('subtask1/1.in', Buffer.from('2 3\n'));
+  zip.addFile('subtask1/1.out', Buffer.from('5\n'));
   const fd = new FormData();
   fd.set('replace', '1');
   fd.set('autoScore', '1');
   fd.set('file', new Blob([zip.toBuffer()], { type: 'application/zip' }), 'cases.zip');
   const upload = await request('POST', `/api/problems/${encodeURIComponent(problemId)}/cases/zip`, fd);
   assert.strictEqual(upload.imported, 1, 'zip case upload should import one pair');
+  cases = await request('GET', `/api/problems/${encodeURIComponent(problemId)}/cases?content=1`);
+  assert.strictEqual(cases.cases[0].subtask, 'subtask1', 'zip directory should become case subtask');
 
   await request('POST', `/api/problems/${encodeURIComponent(problemId)}/status`, { isPublic: false });
   let publicList = await request('GET', '/api/problems');

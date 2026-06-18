@@ -1,5 +1,3 @@
-const path = require('path');
-
 function cppLanguage(name, standard) {
   return {
     name,
@@ -7,10 +5,10 @@ function cppLanguage(name, standard) {
     executable: 'main',
     compile: (workdir, options = {}) => ({
       command: 'g++',
-      args: ['main.cpp', options.optimize === false ? '-O0' : '-O2', `-std=${standard}`, '-DONLINE_JUDGE', '-o', path.join(workdir, 'main')],
+      args: ['main.cpp', options.optimize === false ? '-O0' : '-O2', `-std=${standard}`, '-DONLINE_JUDGE', '-o', 'main'],
       timeoutMs: 10000,
     }),
-    run: (workdir) => ({ command: path.join(workdir, 'main'), args: [] }),
+    run: () => ({ command: './main', args: [] }),
   };
 }
 
@@ -24,17 +22,17 @@ const languages = {
     executable: 'main',
     compile: (workdir, options = {}) => ({
       command: 'gcc',
-      args: ['main.c', options.optimize === false ? '-O0' : '-O2', '-std=c11', '-DONLINE_JUDGE', '-o', path.join(workdir, 'main')],
+      args: ['main.c', options.optimize === false ? '-O0' : '-O2', '-std=c11', '-DONLINE_JUDGE', '-o', 'main'],
       timeoutMs: 10000,
     }),
-    run: (workdir) => ({ command: path.join(workdir, 'main'), args: [] }),
+    run: () => ({ command: './main', args: [] }),
   },
   python: {
     name: 'Python 3',
     source: 'main.py',
     executable: null,
     compile: null,
-    run: (workdir) => ({ command: 'python3', args: [path.join(workdir, 'main.py')] }),
+    run: () => ({ command: 'python3', args: ['main.py'] }),
   },
 };
 

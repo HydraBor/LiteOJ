@@ -3,7 +3,8 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const languages = require('./languages');
-const { standardCheck } = require('./checker');
+const { compareOutput } = require('./checker');
+const { sandboxSpec } = require('./sandbox');
 
 const MAX_OUTPUT_BYTES = Number(process.env.JUDGE_MAX_OUTPUT_BYTES || 1024 * 1024);
 
@@ -38,15 +39,23 @@ function runProcess(spec, options = {}) {
       env: { ...process.env, HOME: cwd },
     });
 
-    const timer = setTimeout(() => {
+    function stopChild() {
       killedByTimeout = true;
+      if (typeof spec.onTimeout === 'function') {
+        try { spec.onTimeout(); } catch (_) {}
+      }
       child.kill('SIGKILL');
-    }, timeoutMs);
+    }
+
+    const timer = setTimeout(stopChild, timeoutMs);
 
     child.stdout.on('data', (chunk) => {
       outputBytes += chunk.length;
       if (outputBytes > MAX_OUTPUT_BYTES) {
         outputLimitExceeded = true;
+        if (typeof spec.onTimeout === 'function') {
+          try { spec.onTimeout(); } catch (_) {}
+        }
         child.kill('SIGKILL');
         return;
       }
@@ -70,16 +79,48 @@ function runProcess(spec, options = {}) {
   });
 }
 
-function wrapRunWithLimits(runSpec, memoryLimitMb) {
-  // ulimit -v is a lightweight teaching sandbox. For production, replace this file with isolate/nsjail/firecracker.
-  const memoryKb = Math.max(16, Number(memoryLimitMb || 128)) * 1024;
-  const quoted = [runSpec.command, ...(runSpec.args || [])]
-    .map((part) => `'${String(part).replace(/'/g, `'\\''`)}'`)
-    .join(' ');
-  return {
-    command: 'bash',
-    args: ['-lc', `ulimit -v ${memoryKb}; ${quoted}`],
-  };
+function normalizeScoringMode(value) {
+  return String(value || 'oi') === 'acm' ? 'acm' : 'oi';
+}
+
+function applyScoring(details, scoringMode = 'oi') {
+  const mode = normalizeScoringMode(scoringMode);
+  const totalPossible = details.reduce((sum, item) => sum + (Number(item.rawScore) || 0), 0);
+  const allAccepted = details.length > 0 && details.every((item) => item.status === 'Accepted');
+  const firstFailure = details.find((item) => item.status !== 'Accepted');
+  let totalScore = 0;
+
+  if (mode === 'acm') {
+    totalScore = allAccepted ? totalPossible : 0;
+    details.forEach((item) => { item.score = allAccepted && item.status === 'Accepted' ? Number(item.rawScore) || 0 : 0; });
+  } else {
+    const hasSubtasks = details.some((item) => item.subtask);
+    if (hasSubtasks) {
+      const groups = new Map();
+      for (const item of details) {
+        const key = item.subtask ? `subtask:${item.subtask}` : `case:${item.caseId}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(item);
+      }
+      for (const group of groups.values()) {
+        const groupAccepted = group.every((item) => item.status === 'Accepted');
+        for (const item of group) {
+          item.score = groupAccepted && item.status === 'Accepted' ? Number(item.rawScore) || 0 : 0;
+          if (!groupAccepted && item.status === 'Accepted' && item.subtask) item.message = 'subtask contains failed test cases';
+        }
+      }
+      totalScore = details.reduce((sum, item) => sum + (Number(item.score) || 0), 0);
+    } else {
+      for (const item of details) item.score = item.status === 'Accepted' ? Number(item.rawScore) || 0 : 0;
+      totalScore = details.reduce((sum, item) => sum + (Number(item.score) || 0), 0);
+    }
+  }
+
+  const status = allAccepted
+    ? 'Accepted'
+    : (totalScore > 0 ? 'Partially Accepted' : (firstFailure?.status || 'Wrong Answer'));
+  details.forEach((item) => { delete item.rawScore; });
+  return { status, score: totalScore, details, totalPossible };
 }
 
 async function judgeTask(task) {
@@ -95,7 +136,7 @@ async function judgeTask(task) {
   try {
     if (language.compile) {
       const compileSpec = language.compile(workdir, { optimize: task.submission.optimize !== false });
-      const compileRes = await runProcess(compileSpec, { cwd: workdir, timeoutMs: compileSpec.timeoutMs || 10000, memoryLimitMb: 512 });
+      const compileRes = await runProcess(sandboxSpec(compileSpec, { cwd: workdir, memoryLimitMb: 512, phase: 'compile' }), { cwd: workdir, timeoutMs: compileSpec.timeoutMs || 10000, memoryLimitMb: 512 });
       if (compileRes.code !== 0 || compileRes.timeout) {
         return {
           status: 'Compile Error',
@@ -109,16 +150,14 @@ async function judgeTask(task) {
     }
 
     const details = [];
-    let totalScore = 0;
     let maxTime = 0;
-    let status = 'Accepted';
     const cases = task.cases || [];
     if (cases.length === 0) {
       return { status: 'System Error', score: 0, message: 'No test cases configured', details: [] };
     }
 
     for (const test of cases) {
-      const runSpec = wrapRunWithLimits(language.run(workdir), task.problem.memoryLimit);
+      const runSpec = sandboxSpec(language.run(workdir), { cwd: workdir, memoryLimitMb: task.problem.memoryLimit, phase: 'run' });
       const runRes = await runProcess(runSpec, {
         cwd: workdir,
         input: test.input,
@@ -138,29 +177,29 @@ async function judgeTask(task) {
       } else if (runRes.code !== 0) {
         caseStatus = 'Runtime Error';
         message = (runRes.stderr || `exit code ${runRes.code}, signal ${runRes.signal || ''}`).slice(0, 1000);
-      } else if (!standardCheck(runRes.stdout, test.output)) {
+      } else if (!compareOutput(runRes.stdout, test.output, {
+        mode: task.problem.checkerMode || 'standard',
+        tolerance: task.problem.checkerTolerance,
+      })) {
         caseStatus = 'Wrong Answer';
         message = 'output differs from expected answer';
-      } else {
-        totalScore += Number(test.score) || 0;
       }
 
       details.push({
         caseId: test.id,
+        subtask: test.subtask || '',
         sort: test.sort,
         status: caseStatus,
-        score: caseStatus === 'Accepted' ? Number(test.score) || 0 : 0,
+        score: 0,
+        rawScore: Number(test.score) || 0,
         timeMs: runRes.timeMs,
         memoryKb: 0,
         message,
       });
-
-      if (caseStatus !== 'Accepted' && status === 'Accepted') status = caseStatus;
     }
 
-    if (totalScore >= 100 && status === 'Accepted') status = 'Accepted';
-    if (totalScore > 0 && totalScore < 100 && status !== 'Accepted') status = 'Partially Accepted';
-    return { status, score: totalScore, timeMs: maxTime, memoryKb: 0, message: '', details };
+    const scored = applyScoring(details, task.problem.scoringMode || 'oi');
+    return { status: scored.status, score: scored.score, timeMs: maxTime, memoryKb: 0, message: '', details: scored.details };
   } catch (err) {
     return { status: 'System Error', score: 0, message: String(err.stack || err.message), details: [] };
   } finally {
@@ -168,4 +207,4 @@ async function judgeTask(task) {
   }
 }
 
-module.exports = { judgeTask, runProcess };
+module.exports = { judgeTask, runProcess, applyScoring };

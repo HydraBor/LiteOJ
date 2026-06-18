@@ -68,9 +68,16 @@ function seedAdmin() {
   if (count > 0) return;
   const username = process.env.ADMIN_USERNAME || 'admin';
   const password = process.env.ADMIN_PASSWORD || 'admin123';
+  if (process.env.NODE_ENV === 'production' && (!process.env.ADMIN_PASSWORD || password === 'admin123' || password.length < 10)) {
+    throw new Error('ADMIN_PASSWORD must be set to a strong initial password in production');
+  }
   db.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)')
     .run(username, bcrypt.hashSync(password, 10), 'admin');
-  console.log(`Created default admin: ${username} / ${password}`);
+  if (process.env.NODE_ENV === 'production') {
+    console.log(`Created admin user: ${username} (initial password comes from ADMIN_PASSWORD)`);
+  } else {
+    console.log(`Created default admin: ${username} / ${password}`);
+  }
 }
 
 function seedProblem(problemDir) {

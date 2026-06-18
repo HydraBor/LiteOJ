@@ -7,11 +7,13 @@ const {
   sortProblems,
 } = require('../backend/problem-utils');
 const { parsePaperQuestions, normalizeGroupName } = require('../backend/prelim-utils');
+const { compareOutput } = require('../judge/checker');
+const { applyScoring } = require('../judge/runner');
 
 function ids(list) { return list.map((x) => x.id); }
 
 const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-assert.strictEqual(packageJson.version, '1.2.3', 'package version should be 1.2.3 after analytics filter redesign');
+assert.strictEqual(packageJson.version, '1.3.0', 'package version should be 1.3.0 after judge system upgrade');
 assert(!('sync-cutoffs' in packageJson.scripts), 'retired cutoff synchronization script should not remain in package scripts');
 assert(!fs.existsSync(path.join(__dirname, '..', 'scripts', 'sync-cutoffs.js')), 'retired cutoff synchronization script should be removed');
 assert(!fs.existsSync(path.join(__dirname, '..', 'seed', 'cutoffs')), 'retired cutoff seed directory should be removed');
@@ -45,6 +47,23 @@ assert.deepStrictEqual(ids(sortProblems([
   { id: 'A2', title: 'x' },
   { id: 'AA1', title: 'x' },
 ])), ['A2', 'A100', 'AA1', 'P2', 'P10']);
+
+assert(compareOutput('1  2\n3\n', '1 2 3\n', { mode: 'ignore_space' }), 'ignore_space checker should compare token streams');
+assert(compareOutput('Yes\n', 'yes\n', { mode: 'case_insensitive' }), 'case_insensitive checker should ignore letter case');
+assert(compareOutput('3.1415926\n', '3.141593\n', { mode: 'float', tolerance: 0.00001 }), 'float checker should accept answers within tolerance');
+assert(!compareOutput('3.14\n', '3.20\n', { mode: 'float', tolerance: 0.00001 }), 'float checker should reject answers outside tolerance');
+const subtaskScore = applyScoring([
+  { caseId: 1, subtask: 's1', status: 'Accepted', rawScore: 30, score: 0 },
+  { caseId: 2, subtask: 's1', status: 'Wrong Answer', rawScore: 30, score: 0 },
+  { caseId: 3, subtask: 's2', status: 'Accepted', rawScore: 40, score: 0 },
+], 'oi');
+assert.strictEqual(subtaskScore.status, 'Partially Accepted', 'subtask scoring should keep partial status');
+assert.strictEqual(subtaskScore.score, 40, 'failed subtask should award zero for every case in the group');
+const acmScore = applyScoring([
+  { caseId: 1, status: 'Accepted', rawScore: 50, score: 0 },
+  { caseId: 2, status: 'Wrong Answer', rawScore: 50, score: 0 },
+], 'acm');
+assert.strictEqual(acmScore.score, 0, 'ACM scoring should be all-or-nothing');
 
 const paperMd = fs.readFileSync(path.join(__dirname, '..', 'seed', 'prelim', '2025-CSP-J1.md'), 'utf8');
 const solutionMd = fs.readFileSync(path.join(__dirname, '..', 'seed', 'prelim', '2025-CSP-J1-solution.md'), 'utf8');
@@ -169,10 +188,22 @@ assert(serverJs.includes("app.disable('x-powered-by')") && serverJs.includes('se
 assert(serverJs.includes("res.setHeader('Cache-Control', 'no-cache')"), 'SPA fallback should set a Cache-Control header');
 const authJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'auth.js'), 'utf8');
 const authRoutesJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'auth.js'), 'utf8');
+assert(securityJs.includes('function createRateLimit') && securityJs.includes('Retry-After'), 'security helper should expose lightweight API rate limiting');
 assert(authRoutesJs.includes('hashPassword(password)') && authRoutesJs.includes('verifyPassword(password, row.password_hash)') && !authRoutesJs.includes('bcrypt.compareSync'), 'auth routes should use centralized bcrypt password helpers');
+assert(authRoutesJs.includes('LOGIN_RATE_LIMIT') && authRoutesJs.includes('REGISTER_RATE_LIMIT'), 'auth routes should rate-limit login and registration');
+assert(authRoutesJs.includes("process.env.NODE_ENV !== 'production'"), 'production registration should not let the first public registrant become admin');
 assert(authJs.includes('SELECT id, username, role FROM users WHERE id = ?'), 'auth should validate token user still exists before using foreign-keyed user_id');
+assert(authJs.includes('JWT_SECRET must be set to a strong random value in production'), 'production should reject missing or weak JWT_SECRET');
 assert(authJs.includes('clearAuthCookie(req, res)'), 'stale login cookie should be cleared with request-aware cookie attributes');
 assert(authJs.includes("res.cookie(COOKIE_NAME, 'deleted'") && authJs.includes('httpOnly: true') && authJs.includes('if (cookieSecure(req)) options.secure = true'), 'auth cookie clearing should use valid request-aware HttpOnly/Secure attributes');
+const judgeRouteJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'judge.js'), 'utf8');
+assert(judgeRouteJs.includes('JUDGE_TOKEN must be set to a strong random value in production'), 'production should reject missing or weak JUDGE_TOKEN');
+const composeYaml = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.yml'), 'utf8');
+assert(composeYaml.includes('profiles:') && composeYaml.includes('container-judge'), 'container judge should be behind an explicit compose profile');
+assert(composeYaml.includes('JWT_SECRET:?') && composeYaml.includes('JUDGE_TOKEN:?') && composeYaml.includes('ADMIN_PASSWORD:?'), 'compose should require production secrets');
+const oneClickScript = fs.readFileSync(path.join(__dirname, '..', 'liteoj.sh'), 'utf8');
+assert(oneClickScript.includes('JUDGE_SANDBOX=docker') && oneClickScript.includes('compose up -d --build app'), 'one-click script should use host judge with Docker sandbox and only start the app service');
+assert(oneClickScript.includes('ADMIN_PASSWORD=$(random_secret)'), 'one-click script should generate a random initial admin password');
 
 const seedProblemJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'seed', 'problems', 'P1001', 'problem.json'), 'utf8'));
 assert(!seedProblemJson.description.includes('数学公式示例') && !seedProblemJson.description.includes('a^2+b^2'), 'seed A+B problem should not include unrelated math formula examples');
@@ -180,8 +211,10 @@ assert(seedProblemJson.description.includes('$a$') && seedProblemJson.descriptio
 assert.deepStrictEqual(seedProblemJson.tags, ['模拟'], 'seed A+B problem should only keep the 模拟 tag');
 const initJs = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'init.js'), 'utf8');
 assert(initJs.includes('shouldRefreshSample') && initJs.includes('数学公式示例') && initJs.includes("raw.id === 'P1001'") && initJs.includes("JSON.stringify(['模拟'])"), 'init should refresh stored P1001 statement/tags when rerun');
+assert(initJs.includes('ADMIN_PASSWORD must be set to a strong initial password in production'), 'production initialization should reject default admin password');
 
 const routes = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'problems.js'), 'utf8');
+assert(routes.includes('TESTDATA_UNZIPPED_LIMIT') && routes.includes('测试数据解压后总大小不能超过'), 'zip upload should limit total uncompressed testdata size');
 assert(routes.includes("['publish', 'public', 'show']") && routes.includes("['hide', 'hidden']"), 'problem batch visibility actions should accept configured action aliases');
 assert(routes.includes('copyAttachmentsAndRewriteDescription'), 'clone should copy and rewrite attachment URLs');
 for (const route of ["router.patch('/:id/status'", "router.post('/:id/status'", "router.post('/:id/clone'", "router.post('/:id/attachments'", "router.get('/:id/attachments/:filename'", "router.delete('/:id'", "router.get('/:id/cases'", "router.post('/:id/cases'", "router.post('/:id/cases/zip'", "router.delete('/:id/cases/:caseId'", "router.post('/:id/rejudge'", "router.post('/:id/submit'"]) {
@@ -227,9 +260,20 @@ assert(appJs.includes('path.match(/^\\/admin\\/problem\\/([A-Z]+\\d+)\\/edit$/)'
 assert(appJs.includes('path.match(/^\\/admin\\/problem\\/([A-Z]+\\d+)\\/data$/)') && appJs.includes('return await renderCaseManager(m[1]);') || appJs.includes('return renderCaseManager(m[1]);'), 'testdata route should dispatch to renderCaseManager');
 assert(appJs.includes('async function saveProblemEditor') && appJs.includes("const method = isNew ? 'POST' : 'PUT'") && appJs.includes("const url = isNew ? '/api/problems' : problemApi(body.id)"), 'problem editor save should distinguish create/update');
 
-console.log('Smoke tests passed: programming problems and CSP preliminary question bank logic look consistent.');
-
 const dbJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'db.js'), 'utf8');
-for (const col of ["ensureColumn('problems', 'description'", "ensureColumn('problems', 'tags_json'", "ensureColumn('problems', 'time_limit'", "ensureColumn('submissions', 'optimize'"]) {
+for (const col of [
+  "ensureColumn('problems', 'description'",
+  "ensureColumn('problems', 'tags_json'",
+  "ensureColumn('problems', 'time_limit'",
+  "ensureColumn('problems', 'scoring_mode'",
+  "ensureColumn('problems', 'checker_mode'",
+  "ensureColumn('problem_cases', 'subtask'",
+  "ensureColumn('submissions', 'optimize'",
+]) {
   assert(dbJs.includes(col), `database migration missing ${col}`);
 }
+assert(appJs.includes('SCORING_MODES') && appJs.includes('CHECKER_MODES') && appJs.includes('name="scoringMode"') && appJs.includes('name="checkerMode"') && appJs.includes('name="subtask"'), 'frontend should expose scoring, checker, and subtask controls');
+const sandboxJs = fs.readFileSync(path.join(__dirname, '..', 'judge', 'sandbox.js'), 'utf8');
+assert(sandboxJs.includes("'--network', 'none'") && sandboxJs.includes("'--read-only'") && sandboxJs.includes("'--cap-drop', 'ALL'"), 'docker sandbox should disable network and drop container privileges');
+
+console.log('Smoke tests passed: programming problems, judge modes, and CSP preliminary question bank logic look consistent.');

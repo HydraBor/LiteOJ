@@ -1,6 +1,6 @@
 # LiteOJ 部署手册
 
-本文说明 LiteOJ 的本地、局域网、Docker 和云服务器部署方式。公网同机部署推荐使用项目根目录的 `liteoj.sh`，让 Web 与 judge 保持不同运行边界，并让用户代码进入 Docker 沙箱。
+本文说明 LiteOJ 的本地、局域网、Docker 和云服务器部署方式。公网同机部署推荐使用项目根目录的 `start.sh`，让 Web 与 judge 保持不同运行边界，并让用户代码进入 Docker 沙箱。
 
 ## 1. 推荐服务器配置
 
@@ -34,29 +34,29 @@ Web 和 SQLite 很轻，主要资源消耗来自 C/C++ 编译和 judge worker。
 cd /opt
 git clone <你的仓库地址> LiteOJ
 cd LiteOJ
-chmod +x ./liteoj.sh
-./liteoj.sh start
+./start.sh
 ```
 
-`liteoj.sh start` 会做这些事：
+`start.sh` 会做这些事：
 
 1. 如果 `.env` 不存在或缺少关键项，自动生成/补齐 `.env`，并写入随机 `JWT_SECRET`、`JUDGE_TOKEN` 和 `ADMIN_PASSWORD`；
-2. 检查 Docker Engine 和 Docker Compose plugin，缺失时在 Ubuntu/Debian 上尝试自动安装；
-3. 写入并确认加载 Docker registry 国内镜像，已有自定义 Docker daemon 配置时不会覆盖；
-4. 检查宿主机 Node.js，缺失时从国内镜像准备 portable Node.js 22 到 `.runtime/node`；
-5. 启动 `docker compose up -d --build app`，只让 Web 服务进入容器；
-6. 在宿主机启动 `judge/worker.js`，并强制使用 `JUDGE_SANDBOX=docker`；
-7. 每次编译/运行用户代码时创建无网络、限内存、限进程、只读根文件系统的 Docker 沙箱容器。
+2. 非 root 用户会提示输入 sudo 密码，用于安装 Docker、调整 apt 源和启动 Docker daemon；
+3. 在 Ubuntu/Debian 上把 apt、Docker apt 仓库、Docker registry、Node.js 下载和 npm registry 尽量切到国内镜像；
+4. 检查 Docker Engine 和 Docker Compose plugin，缺失时在 Ubuntu/Debian 上尝试自动安装；
+5. 检查宿主机 Node.js，缺失时从国内镜像准备 portable Node.js 22 到 `.runtime/node`；
+6. 启动 `docker compose up -d --build app`，只让 Web 服务进入容器；
+7. 在宿主机启动 `judge/worker.js`，并强制使用 `JUDGE_SANDBOX=docker`；
+8. 每次编译/运行用户代码时创建无网络、限内存、限进程、只读根文件系统的 Docker 沙箱容器。
 
 如果服务器上已经存在旧数据库，脚本不会覆盖已有管理员密码。旧部署仍使用 `admin/admin123` 的，请登录后到个人主页立即修改密码，或清空数据卷后重新初始化。
 
 常用命令：
 
 ```bash
-./liteoj.sh status
-./liteoj.sh logs
-./liteoj.sh restart
-./liteoj.sh stop
+./start.sh status
+./start.sh logs
+./start.sh restart
+./start.sh stop
 ```
 
 访问：
@@ -88,7 +88,7 @@ failed to resolve source metadata for docker.io/library/node:22-bookworm-slim
 dial tcp ... registry-1.docker.io:443: i/o timeout
 ```
 
-通常说明 Docker daemon 没有加载 mirror 配置，或当前网络无法直连 Docker Hub。新版 `liteoj.sh` 会在构建前重启 Docker、检查 mirror 是否加载，并预拉取 `node:22-bookworm-slim`；如果 Docker Hub 仍然超时，会尝试直接从 mirror 拉取并重新标记镜像。
+通常说明 Docker daemon 没有加载 mirror 配置，或当前网络无法直连 Docker Hub。新版 `start.sh` 会在构建前检查 mirror 是否加载，并预拉取 `node:22-bookworm-slim`；如果 Docker Hub 仍然超时，会尝试直接从 mirror 拉取并重新标记镜像。
 
 手动处理命令如下：
 
@@ -215,7 +215,7 @@ cp .env.example .env
 docker compose up -d --build app
 ```
 
-默认 Compose 只建议启动 `app` 服务，适合作为 Web 容器。公网同机部署请配合 `./liteoj.sh start`，由脚本在宿主机启动 Docker 沙箱 judge。
+默认 Compose 只建议启动 `app` 服务，适合作为 Web 容器。公网同机部署请配合 `./start.sh`，由脚本在宿主机启动 Docker 沙箱 judge。
 
 容器内 judge 只保留给本地和可信内网教学，必须显式启用 profile：
 
@@ -296,6 +296,13 @@ TESTDATA_UNZIPPED_LIMIT=200
 LOGIN_RATE_LIMIT=20
 REGISTER_RATE_LIMIT=10
 COOKIE_SECURE=auto
+NPM_REGISTRY=https://registry.npmmirror.com
+DOCKER_BUILD_APT_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian
+DOCKER_BUILD_APT_SECURITY_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian-security
+DOCKER_BUILD_NETWORK=host
+LITEOJ_AUTO_PORT=1
+LITEOJ_PORT_SCAN_END=3099
+LITEOJ_APT_MIRROR=1
 ```
 
 正式部署必须修改：
@@ -318,6 +325,20 @@ JUDGE_SANDBOX=docker
 ```text
 BACKEND_URL=http://app:3000
 JUDGE_SANDBOX=host
+```
+
+国内网络相关：
+
+```text
+NPM_REGISTRY                 # Docker build 内 npm install 使用的 npm registry
+DOCKER_BUILD_APT_MIRROR      # Docker build 内 Debian apt 使用的镜像；默认用 http，避免基础镜像安装证书前无法访问 https
+DOCKER_BUILD_APT_SECURITY_MIRROR # Docker build 内 Debian security apt 使用的镜像
+DOCKER_BUILD_NETWORK=host    # Docker build 使用宿主机网络，适合云服务器和有自定义路由的环境；需要关闭时可设为 default
+LITEOJ_AUTO_PORT=1           # start.sh 检测到 PORT 被占用时自动切到下一个可用端口；设为 0 可关闭
+LITEOJ_PORT_SCAN_END=3099    # 自动找端口的结束范围
+LITEOJ_APT_MIRROR=1          # start.sh 自动将宿主机 Ubuntu/Debian apt 源切到国内镜像；设为 0 可关闭
+LITEOJ_DOCKER_APT_REPO       # 可选：指定 Docker CE apt 仓库镜像
+LITEOJ_DOCKER_MIRROR=1       # start.sh 自动配置 Docker registry mirror；设为 0 可关闭
 ```
 
 ## 10. 备份与恢复
@@ -343,7 +364,7 @@ tar -xzf liteoj-data-YYYY-MM-DD.tar.gz
 - 尽量使用 HTTPS。
 - 公网部署时限制后台访问或开启更强的服务器安全策略。
 - 同机部署时不要把 Docker socket 挂给 Web 容器。
-- 推荐使用 `./liteoj.sh start` 的“Web 容器 + 宿主机 judge + Docker 沙箱”结构。
+- 推荐使用 `./start.sh` 的“Web 容器 + 宿主机 judge + Docker 沙箱”结构。
 - 容器内 `host` judge 只用于本地和可信内网，不要用于陌生公网用户。
 - 更高安全等级仍建议把 judge 拆到独立主机/VM，并评估 isolate、nsjail、gVisor 或 Firecracker。
 - 不建议让 Web 服务和 judge 共享同一高权限用户；judge 不需要挂载 `data/`，只通过 API 领取测试数据。

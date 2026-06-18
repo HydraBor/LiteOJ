@@ -1,6 +1,12 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      network: ${DOCKER_BUILD_NETWORK:-host}
+      args:
+        APT_MIRROR: ${DOCKER_BUILD_APT_MIRROR:-http://mirrors.tuna.tsinghua.edu.cn/debian}
+        APT_SECURITY_MIRROR: ${DOCKER_BUILD_APT_SECURITY_MIRROR:-http://mirrors.tuna.tsinghua.edu.cn/debian-security}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     image: liteoj:latest
     container_name: liteoj-app
     environment:
@@ -26,7 +32,13 @@ services:
   judge:
     profiles:
       - container-judge
-    build: .
+    build:
+      context: .
+      network: ${DOCKER_BUILD_NETWORK:-host}
+      args:
+        APT_MIRROR: ${DOCKER_BUILD_APT_MIRROR:-http://mirrors.tuna.tsinghua.edu.cn/debian}
+        APT_SECURITY_MIRROR: ${DOCKER_BUILD_APT_SECURITY_MIRROR:-http://mirrors.tuna.tsinghua.edu.cn/debian-security}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     image: liteoj:latest
     container_name: liteoj-judge
     environment:

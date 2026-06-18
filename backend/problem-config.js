@@ -1,0 +1,38 @@
+const SCORING_MODES = new Set(['oi', 'acm']);
+const CHECKER_MODES = new Set(['standard', 'ignore_space', 'case_insensitive', 'float']);
+
+function boolToInt(value) {
+  return value ? 1 : 0;
+}
+
+function parseBoolean(value, fallback = false) {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'boolean') return value;
+  return ['1', 'true', 'on', 'yes'].includes(String(value).toLowerCase());
+}
+
+function normalizeScoringMode(value, fallback = 'oi') {
+  const mode = String(value || fallback).trim();
+  return SCORING_MODES.has(mode) ? mode : fallback;
+}
+
+function normalizeCheckerMode(value, fallback = 'standard') {
+  const mode = String(value || fallback).trim();
+  return CHECKER_MODES.has(mode) ? mode : fallback;
+}
+
+function normalizeCheckerTolerance(value, fallback = 0.000001) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.min(n, 1);
+}
+
+module.exports = {
+  SCORING_MODES,
+  CHECKER_MODES,
+  boolToInt,
+  parseBoolean,
+  normalizeScoringMode,
+  normalizeCheckerMode,
+  normalizeCheckerTolerance,
+};

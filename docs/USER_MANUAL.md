@@ -276,14 +276,14 @@ npm run judge
 使用一键同机部署时查看：
 
 ```bash
-./liteoj.sh status
+./start.sh status
 tail -f logs/judge.log
 ```
 
 如果只启动了 Web 容器，可以重新拉起宿主机 Docker 沙箱 judge：
 
 ```bash
-./liteoj.sh restart
+./start.sh restart
 ```
 
 仅本地/可信内网使用容器内 judge profile 时查看：

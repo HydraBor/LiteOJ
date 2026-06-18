@@ -3,7 +3,7 @@ const AdmZip = require('adm-zip');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
-const { db, DATA_DIR, problemFromRow, caseFromRow } = require('../db');
+const { db, problemFromRow, caseFromRow } = require('../db');
 const { requireLogin, requireAdmin } = require('../auth');
 const {
   normalizeDifficulty,
@@ -12,20 +12,31 @@ const {
   compareNatural,
   sortProblems,
 } = require('../problem-utils');
+const {
+  boolToInt,
+  parseBoolean,
+  normalizeScoringMode,
+  normalizeCheckerMode,
+  normalizeCheckerTolerance,
+} = require('../problem-config');
+const {
+  sanitizeDataFileName,
+  sanitizeSubtaskName,
+  problemRoot,
+  ensureProblemDir,
+  attachmentDir,
+  sanitizeAttachmentFileName,
+  copyAttachmentsAndRewriteDescription,
+  caseRelativePath,
+  absoluteDataPath,
+  readCaseContent,
+} = require('../problem-files');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Number(process.env.TESTDATA_ZIP_LIMIT || 50) * 1024 * 1024 } });
 const attachmentUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Number(process.env.ATTACHMENT_IMAGE_LIMIT || 5) * 1024 * 1024 } });
 const TESTDATA_UNZIPPED_LIMIT_BYTES = Number(process.env.TESTDATA_UNZIPPED_LIMIT || 200) * 1024 * 1024;
-const SCORING_MODES = new Set(['oi', 'acm']);
-const CHECKER_MODES = new Set(['standard', 'ignore_space', 'case_insensitive', 'float']);
 
-function boolToInt(v) { return v ? 1 : 0; }
-function parseBoolean(value, fallback = false) {
-  if (value === undefined || value === null) return fallback;
-  if (typeof value === 'boolean') return value;
-  return ['1', 'true', 'on', 'yes'].includes(String(value).toLowerCase());
-}
 function getParamId(req) { return requireProblemCode(req.params.id); }
 
 function nextProblemId() {
@@ -38,75 +49,6 @@ function nextProblemId() {
   return `P${max + 1}`;
 }
 
-function sanitizeDataFileName(filename) {
-  const raw = String(filename || '').replace(/\\/g, '/').split('/').filter(Boolean).join('_');
-  return raw.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^\.+/, '') || `file_${Date.now()}`;
-}
-function sanitizeSubtaskName(value) {
-  return String(value || '')
-    .replace(/\\/g, '/')
-    .split('/')
-    .map((part) => part.trim().replace(/[^a-zA-Z0-9._\-\u4e00-\u9fa5]/g, '_'))
-    .filter(Boolean)
-    .join('/')
-    .slice(0, 80);
-}
-function normalizeScoringMode(value, fallback = 'oi') {
-  const mode = String(value || fallback).trim();
-  return SCORING_MODES.has(mode) ? mode : fallback;
-}
-function normalizeCheckerMode(value, fallback = 'standard') {
-  const mode = String(value || fallback).trim();
-  return CHECKER_MODES.has(mode) ? mode : fallback;
-}
-function normalizeCheckerTolerance(value, fallback = 0.000001) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0) return fallback;
-  return Math.min(n, 1);
-}
-function ensureProblemDir(problemId) {
-  const dir = path.join(DATA_DIR, 'problems', `${problemId}`, 'testdata');
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
-function problemRoot(problemId) { return path.join(DATA_DIR, 'problems', `${problemId}`); }
-function attachmentDir(problemId) {
-  const dir = path.join(problemRoot(problemId), 'attachments');
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
-function sanitizeAttachmentFileName(filename) {
-  const ext = path.extname(String(filename || '')).toLowerCase();
-  const base = path.basename(String(filename || 'image'), ext).replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^_+|_+$/g, '') || 'image';
-  return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${base}${ext}`;
-}
-function copyAttachmentsAndRewriteDescription(fromId, toId, description) {
-  const fromDir = path.join(problemRoot(fromId), 'attachments');
-  const toDir = attachmentDir(toId);
-  if (fs.existsSync(fromDir)) {
-    for (const name of fs.readdirSync(fromDir)) {
-      const src = path.join(fromDir, name);
-      const dest = path.join(toDir, name);
-      if (fs.statSync(src).isFile()) fs.copyFileSync(src, dest);
-    }
-  }
-  const fromPrefix = `/api/problems/${encodeURIComponent(fromId)}/attachments/`;
-  const toPrefix = `/api/problems/${encodeURIComponent(toId)}/attachments/`;
-  return String(description || '').split(fromPrefix).join(toPrefix);
-}
-function caseRelativePath(problemId, file) { return path.join('problems', `${problemId}`, 'testdata', file).replace(/\\/g, '/'); }
-function absoluteDataPath(relativePath) {
-  const full = path.resolve(DATA_DIR, relativePath);
-  const base = path.resolve(DATA_DIR);
-  if (full !== base && !full.startsWith(base + path.sep)) throw Object.assign(new Error('非法文件路径'), { status: 400 });
-  return full;
-}
-function readCaseContent(row) {
-  const c = caseFromRow(row);
-  c.input = fs.existsSync(absoluteDataPath(row.input_path)) ? fs.readFileSync(absoluteDataPath(row.input_path), 'utf8') : '';
-  c.output = fs.existsSync(absoluteDataPath(row.output_path)) ? fs.readFileSync(absoluteDataPath(row.output_path), 'utf8') : '';
-  return c;
-}
 function clearProblemCases(problemId) {
   db.prepare('DELETE FROM problem_cases WHERE problem_id = ?').run(problemId);
   const dir = ensureProblemDir(problemId);

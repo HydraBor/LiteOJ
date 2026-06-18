@@ -203,7 +203,7 @@ host: timeout + ulimit + 独立工作目录
 docker: 每次编译/运行进入无网络、限内存、限进程、只读根文件系统的 Docker 容器
 ```
 
-`host` 适合本地、内网和小规模课程训练。公网同机部署时，推荐通过 `liteoj.sh` 让 Web 跑在 `app` 容器中、judge worker 跑在宿主机上，并启用 `JUDGE_SANDBOX=docker`。更高安全要求时仍建议把 judge worker 拆到独立主机或隔离 VM，或替换为 isolate、nsjail、gVisor、Firecracker 等更强沙箱。
+`host` 适合本地、内网和小规模课程训练。公网同机部署时，推荐通过 `start.sh` 让 Web 跑在 `app` 容器中、judge worker 跑在宿主机上，并启用 `JUDGE_SANDBOX=docker`。更高安全要求时仍建议把 judge worker 拆到独立主机或隔离 VM，或替换为 isolate、nsjail、gVisor、Firecracker 等更强沙箱。
 
 `docker-compose.yml` 中的 `judge` 服务放在 `container-judge` profile 下，仅作为本地或可信内网的简化部署方式，不作为公网陌生提交的推荐路径。
 

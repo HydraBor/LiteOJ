@@ -85,7 +85,7 @@ POST /api/judge/:id/result
 公网同机部署不要直接使用默认 `host` 模式。推荐使用根目录脚本：
 
 ```bash
-./liteoj.sh start
+./start.sh
 ```
 
 脚本会启动 Web 容器，并在宿主机以 `JUDGE_SANDBOX=docker` 启动 judge worker。这样用户代码会进入无网络 Docker 沙箱，而不会和 Web 容器或 judge worker 共享同一进程空间。

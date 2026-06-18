@@ -27,7 +27,7 @@
 - 测试点支持子任务分组，zip 子目录会自动映射为子任务；
 - 输出比较支持标准比较、忽略空白、大小写不敏感和浮点误差；
 - judge worker 支持 `JUDGE_SANDBOX=host/docker`，Docker 模式为每次编译/运行创建无网络、限内存、限进程、只读根文件系统的容器。
-- 同机公网部署推荐 `./liteoj.sh start`：Web 使用 Docker Compose `app` 容器，judge worker 在宿主机运行，并强制使用 Docker 沙箱执行用户代码。
+- 同机公网部署推荐 `./start.sh`：Web 使用 Docker Compose `app` 容器，judge worker 在宿主机运行，并强制使用 Docker 沙箱执行用户代码。
 
 ## 2. 已清理内容
 
@@ -112,7 +112,7 @@
 - judge worker 会按 OI/ACM/子任务规则结算分数；
 - Docker Compose 默认只启动 Web `app` 服务；
 - 容器内 judge 被放入 `container-judge` profile，仅作为本地或可信内网教学的简化模式；
-- `liteoj.sh` 会自动生成 `.env` 强随机密钥、检测 Docker/Node、启动 Web 容器和宿主机 Docker 沙箱 judge。
+- `start.sh` 会自动生成 `.env` 强随机密钥、检测 Docker/Node、启动 Web 容器和宿主机 Docker 沙箱 judge。
 
 ## 8. 安全收尾检查
 

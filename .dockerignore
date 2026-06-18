@@ -4,5 +4,7 @@ data
 uploads
 backups
 .tmp
+.runtime
+logs
 .env
 *.log

@@ -342,6 +342,23 @@ function renderQuestionOptions(q, inputMode = 'button', readonly = false) {
   return `<div class="prelim-options">${options.map((o) => prelimOptionButton(o).replace('class="prelim-option"', `class="prelim-option" ${readonly ? 'disabled' : ''}`)).join('')}</div>`;
 }
 
+function renderReportQuestionOptions(q, answer = {}) {
+  const options = q.options || [];
+  const selected = answer.selectedAnswer || '';
+  const correct = q.answer || '';
+  if (!options.length) return '<p class="muted small mock-report-empty-options">本题暂无选项数据</p>';
+  return `<div class="mock-options mock-report-options">${options.map((o) => {
+    const key = String(o.key || '');
+    const classes = ['mock-option', 'mock-report-option'];
+    if (key === correct) classes.push('correct-answer');
+    if (selected && key === selected) classes.push(key === correct ? 'selected-correct' : 'selected-wrong');
+    const badges = [];
+    if (selected && key === selected) badges.push('<span class="mock-option-badge selected">你的选择</span>');
+    if (key === correct) badges.push('<span class="mock-option-badge correct">正确答案</span>');
+    return `<div class="${classes.join(' ')}" data-option-key="${esc(key)}"><span class="option-key">${esc(storedAnswerText(key))}</span><span class="option-text markdown">${renderInlineMarkdown(o.text || '')}${badges.length ? `<span class="mock-option-badges">${badges.join('')}</span>` : ''}</span></div>`;
+  }).join('')}</div>`;
+}
+
 
 function sortText(s) { return ({ default: '默认排序', recent: '最新创建', title: '标题排序', difficulty: '难度排序', acceptance: '通过率' }[s] || '默认排序'); }
 function optionList(items = [], selected = '', label = '全部') {
@@ -1839,14 +1856,36 @@ async function renderMockExam(id) {
 }
 function mockReportQuestion(q, answers) {
   const a = answers[q.id] || {};
-  return `<div class="mock-report-question">${numberedStem(q, 'small-stem')}<p class="${a.correct ? 'success' : 'error'}">你的答案：${esc(storedAnswerText(a.selectedAnswer)) || '未作答'}　正确答案：${esc(storedAnswerText(q.answer))}　${a.correct ? '正确' : '错误'}</p><div class="markdown">${renderMarkdown(q.explanation || '暂无解析')}</div><p>${prelimTagWeights(q.tags || [])}</p></div>`;
+  const answered = Boolean(a.selectedAnswer);
+  const stateClass = !answered ? 'unanswered' : a.correct ? 'correct' : 'wrong';
+  const stateText = !answered ? '未作答' : a.correct ? '正确' : '错误';
+  return `<article class="mock-report-question ${stateClass}">
+    <div class="mock-report-question-head">
+      <span class="mock-answer-pill ${stateClass}">${stateText}</span>
+      <span>你的答案：<b>${esc(storedAnswerText(a.selectedAnswer)) || '未作答'}</b></span>
+      <span>正确答案：<b>${esc(storedAnswerText(q.answer)) || '--'}</b></span>
+      <span>得分：<b>${formatScore(a.score || 0)}</b> / ${formatScore(q.score || 0)}</span>
+    </div>
+    <div class="mock-report-question-grid">
+      <div class="mock-report-original">
+        <div class="mock-report-block-title">原题与选项</div>
+        ${numberedStem(q, 'small-stem mock-report-stem')}
+        ${renderReportQuestionOptions(q, a)}
+      </div>
+      <aside class="mock-report-analysis">
+        <div class="mock-report-block-title">答案解析</div>
+        <div class="markdown">${renderMarkdown(q.explanation || '暂无解析')}</div>
+        <p>${prelimTagWeights(q.tags || [])}</p>
+      </aside>
+    </div>
+  </article>`;
 }
 function mockReportGroup(g, answers) {
   if (g.section === 'single_choice') {
     return (g.questions || []).map((q) => mockReportQuestion(q, answers)).join('');
   }
   const groupStem = shouldShowPrelimGroupStem(g) ? `<div class="markdown mock-group-stem">${renderMarkdown(g.stem)}</div>` : '';
-  return `<div class="mock-report-item"><h3>${esc(groupShortTitle(g))}</h3>${groupStem}${g.code ? renderCodeBlock(g.code, 'cpp') : ''}${(g.questions || []).map((q) => mockReportQuestion(q, answers)).join('')}</div>`;
+  return `<div class="mock-report-item"><h3>${esc(groupShortTitle(g))}</h3><div class="mock-report-group-source">${groupStem}${g.code ? renderCodeBlock(g.code, 'cpp') : ''}</div>${(g.questions || []).map((q) => mockReportQuestion(q, answers)).join('')}</div>`;
 }
 function mockReportSection(section, groups, answers) {
   if (!groups.length) return '';
@@ -1855,11 +1894,34 @@ function mockReportSection(section, groups, answers) {
 function renderMockReportSections(groups = [], answers = {}) {
   return PRELIM_SECTION_ORDER.map((section) => mockReportSection(section, groups.filter((g) => g.section === section), answers)).join('');
 }
+function mockReportStats(groups = [], answers = {}) {
+  const stats = { total: 0, correct: 0, wrong: 0, unanswered: 0 };
+  groups.forEach((g) => (g.questions || []).forEach((q) => {
+    stats.total += 1;
+    const a = answers[q.id] || {};
+    if (!a.selectedAnswer) stats.unanswered += 1;
+    else if (a.correct) stats.correct += 1;
+    else stats.wrong += 1;
+  }));
+  return stats;
+}
 async function renderMockReport(id) {
   setImmersive(false);
   const data = await api(`/api/prelim/mock/exams/${id}/report`);
   const answers = data.exam.answers || {};
-  app.innerHTML = `<div class="mock-report-page"><div class="card"><div class="row space"><div><h1>模考报告</h1><p class="muted">${esc(data.exam.title)}</p></div><button onclick="nav('/prelim/mock')">返回模考</button></div><div class="mock-score-big">${formatScore(data.exam.score)}<span>/ ${formatScore(data.exam.totalScore || 0)}</span></div></div>${renderMockReportSections(data.groups || [], answers)}</div>`;
+  const stats = mockReportStats(data.groups || [], answers);
+  app.innerHTML = `<div class="mock-report-page"><div class="card mock-report-summary-card">
+    <div class="row space mock-report-summary-head"><div><h1>模考报告</h1><p class="muted">${esc(data.exam.title)}${data.exam.submittedAt ? `　提交时间：${esc(formatUtc8Time(data.exam.submittedAt))}` : ''}</p></div><button onclick="nav('/prelim/mock')">返回模考</button></div>
+    <div class="mock-report-summary-body">
+      <div class="mock-score-big">${formatScore(data.exam.score)}<span>/ ${formatScore(data.exam.totalScore || 0)}</span></div>
+      <div class="mock-report-stat-grid">
+        <div><b>${stats.total}</b><span>总题数</span></div>
+        <div class="success"><b>${stats.correct}</b><span>正确</span></div>
+        <div class="error"><b>${stats.wrong}</b><span>错误</span></div>
+        <div><b>${stats.unanswered}</b><span>未作答</span></div>
+      </div>
+    </div>
+  </div>${renderMockReportSections(data.groups || [], answers)}</div>`;
 }
 
 function attrEsc(value) {

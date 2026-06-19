@@ -1,245 +1,175 @@
 # LiteOJ 架构说明
 
-LiteOJ 是面向教学、班级训练和 CSP-J/S 初赛练习的轻量 OJ。项目目标是：保留教学 OJ 的核心闭环，同时把 CSP-J/S 初赛题库、模考和考点分析作为独立模块提供。
+更新时间：2026-06-19
 
-## 1. 总体结构
+## 设计目标
 
-```text
-浏览器 SPA
-  ↓
-Express API + 静态文件服务
-  ↓
-SQLite 数据库 + data 文件目录
-  ↓
-judge worker 独立轮询提交任务
-```
+LiteOJ 面向单机或同机云服务器部署，优先保证：
 
-推荐同机公网部署时，运行边界是：
+- 教学场景下的完整 OJ 闭环；
+- 评测执行与 Web 业务分离；
+- 测试数据和题面管理足够轻量；
+- 国内服务器从空环境启动时可自动准备依赖；
+- 代码结构简单，便于二次开发和排查。
+
+## 进程与容器
 
 ```text
-Nginx/浏览器
-  ↓
-liteoj-app Docker 容器
-  ↓ 127.0.0.1/API
-宿主机 judge worker
-  ↓ 127.0.0.1:5050 /run
-liteoj-go-judge Docker 特权容器
-  ↓ go-judge 受限执行环境
-用户代码编译/运行
+Browser
+  |
+  v
+LiteOJ app container
+  - Express API
+  - SQLite database
+  - frontend static files
+  - testdata / attachments / checker.cpp
+  |
+  | /api/judge/acquire + /api/judge/:id/result
+  v
+Host judge worker
+  - polls pending submissions
+  - calls go-judge
+  - computes score
+  |
+  v
+go-judge container
+  - compiles and runs user code
+  - compiles and runs checker.cpp
 ```
 
-这种方式不把 Docker socket 暴露给 Web 容器；judge worker 只负责领取任务、调用 go-judge、比较输出和回写结果，用户代码不与 Web 服务或 judge worker 共享进程空间。
+`start.sh` 默认启动 `app` 和 `go-judge` 两个容器，并在宿主机启动 judge worker。`docker-compose.yml` 仍保留 `container-judge` profile，便于可信本地环境全容器化运行。
 
-主链路：
+## 后端模块
 
-```text
-用户 -> 题库 -> 提交 -> submissions 表 -> judge worker -> 编译/运行/比较输出 -> 回写结果
-```
+- `backend/server.js`：Express 应用、静态资源、API 挂载、全局错误处理。
+- `backend/db.js`：SQLite 表结构、迁移、行对象转换。
+- `backend/auth.js`：JWT Cookie、登录态解析、权限中间件。
+- `backend/security.js`：安全响应头、静态资源缓存、基础限速。
+- `backend/problem-config.js`：题目配置枚举和表单值归一化。
+- `backend/problem-files.js`：题目目录、测试点、附件、checker.cpp 文件路径。
+- `backend/prelim-utils.js`：CSP 初赛 Markdown 解析和题型归一化。
+- `backend/routes/*`：按业务域拆分的 API。
 
-初赛链路：
+## 前端模块
 
-```text
-Markdown 试卷/解析 -> 解析导入 -> 初赛题库 -> 单题练习/模考 -> 数据分析
-```
+LiteOJ 前端是无构建步骤的单页应用：
 
-## 2. 模块划分
+- `frontend/public/index.html`：页面壳和导航。
+- `frontend/public/app.js`：前端路由、API 调用、页面渲染和交互。
+- `frontend/public/style.css`：全站样式。
 
-```text
-backend/             Express API、数据库迁移、权限中间件
-backend/routes/      按业务拆分的 API 路由
-frontend/public/     单页应用，无构建步骤
-judge/               独立评测端
-seed/                初始化示例题和初赛试卷
-data/                运行时数据、SQLite、测试点、附件
-docs/                项目文档
-scripts/             初始化和测试脚本
-```
+主要页面：
 
-## 3. 架构取舍
+- 公开编程题库：`/problems`
+- 编程题详情：`/problem/:id`
+- 提交记录：`/submissions`
+- 初赛题库：`/prelim`
+- 初赛模考：`/prelim/mock`
+- 考点分析：`/analytics`
+- 后台：`/admin`
+- 题面编辑：`/admin/problem/:id/edit` 和 `/admin/problem/new`
+- 测试数据管理：`/admin/problem/:id/data`
 
-核心设计：
-
-- 主站与评测端分离；
-- 题目、提交、评测任务形成主链路；
-- 测试数据独立存储；
-- 评测端轮询任务并回传结果；
-- 题面用一个 Markdown 字段承载完整内容。
-
-主动简化：
-
-- 不做多 Domain；
-- 不做插件系统；
-- 不做 VJudge；
-- 不做博客、讨论、训练计划等复杂模块；
-- 不做复杂权限位，仅保留 user/admin；
-- 不引入前端构建体系；
-- 输入格式、输出格式、样例、提示和数据范围不拆字段，全部写进 Markdown 题面。
-
-## 4. 数据模型
-
-### 4.1 编程题
+## 数据模型
 
 核心表：
 
-```text
-problems
-problem_cases
-submissions
-```
+- `users`：账号、bcrypt 密码哈希、角色。
+- `problems`：题号、题名、题面、标签、限制、评测模式、公开状态。
+- `problem_cases`：测试点文件、子任务名、分值、排序、单点时空限制。
+- `submissions`：提交、代码、状态、分数、用时、内存、测试点详情。
+- `prelim_*`：初赛试卷、题组、小题、作答记录、模考记录。
 
-`problems`：
-
-```text
-id
-title
-description
-tags_json
-difficulty
-time_limit
-memory_limit
-checker_mode
-checker_tolerance
-is_public
-created_by
-created_at
-updated_at
-```
-
-题号规则：
+题目文件位于 `DATA_DIR/problems/<problemId>/`：
 
 ```text
-^[A-Z]+\d+$
+attachments/       题面图片
+testdata/          .in/.out/.ans 文件
+checker.cpp        Special Judge 源文件
 ```
 
-排序逻辑：先按前缀字典序，再按数字大小。
+## 编程题工作流
 
-测试数据目录：
+### 新增题目
+
+1. 管理员进入 `/admin/problem/new`。
+2. 编辑题号、标题、难度、时空限制、题面、是否启用 Special Judge。
+3. 新题默认不公开。
+4. 创建成功后自动进入测试数据管理页。
+5. 管理员录入测试点、子任务、checker.cpp。
+6. 确认可评测后手动公开题目。
+
+### 提交评测
+
+1. 用户在题目页提交代码。
+2. 后端插入 `submissions`，状态为 `Waiting`。
+3. judge worker 领取任务并锁定为 `Judging`。
+4. go-judge 编译用户程序。
+5. 按测试点运行，超时立即返回 TLE。
+6. 标准题使用内置标准输出比较。
+7. SPJ 题在用户程序运行成功后调用 checker。
+8. runner 按测试点或子任务规则汇总分数。
+9. judge worker 写回结果。
+
+## 计分模型
+
+LiteOJ 使用一种统一模型：
+
+- 无子任务：每个测试点有自己的分值，通过即得分。
+- 有子任务：每个子任务有一个总分，组内所有测试点通过才得该子任务分。
+- 子任务内分值在数据库中存放在该组第一个测试点上，其余测试点为 0；展示和编辑时按组汇总。
+
+这种模型与 CMS 的 `GroupMin` / 子任务分组思想一致：组内任一测试点失败，整组不得分。
+
+## Special Judge
+
+题目启用 `special_judge` 后，需要提供 `checker.cpp`。
+
+runner 会：
+
+1. 使用 go-judge 编译 `checker.cpp` 和 vendored `judge/testlib.h`；
+2. 编译用户程序；
+3. 对每个测试点运行用户程序；
+4. 若用户程序未 RE/TLE/MLE/OLE，则运行 checker；
+5. checker 退出码 0 视为 AC，其他普通失败视为 WA，checker 编译或运行系统错误视为 System Error。
+
+checker 参数顺序：
 
 ```text
-data/problems/P1001/testdata/
+argv[1] = input.txt
+argv[2] = output.txt   # 用户输出
+argv[3] = answer.txt   # 标准输出
 ```
 
-`problem_cases` 额外保存 `subtask`。子任务为空时按单测试点计分；多个测试点共享同一 `subtask` 时，该组必须全部通过才会获得组内分数。
+testlib 中 `registerTestlibCmd(argc, argv)` 会据此初始化 `inf`、`ouf`、`ans`。
 
-附件目录：
+## API 分组
 
-```text
-data/problems/P1001/attachments/
-```
+- `/api/auth`：账号登录态。
+- `/api/profile`：个人资料和改密。
+- `/api/admin`：后台统计和用户角色。
+- `/api/problems`：编程题、附件、checker、测试点、提交入口。
+- `/api/submissions`：提交列表、详情和重测。
+- `/api/judge`：judge worker 内部接口。
+- `/api/prelim`：初赛题库、导入、模考。
+- `/api/analytics`：考点统计。
 
-### 4.2 初赛题库
+具体接口清单见 README。
 
-核心表：
+## 安全边界
 
-```text
-prelim_papers       初赛试卷元信息，例如年份、组别、轮次、官方总分
-prelim_groups       初赛整题；单选题为一题一组，阅读程序/完善程序为一个公共代码块对应多个小题
-prelim_questions    小题；保存题干、选项、答案、解析、知识点和分值
-prelim_attempts     用户单题练习记录
-prelim_mock_exams   初赛模考记录；保存组卷整题 ID、用户答案、得分和官方总分
-```
+- Web 容器不直接执行用户代码。
+- go-judge 只绑定本机回环地址。
+- judge worker 通过 `JUDGE_TOKEN` 调用内部接口。
+- Cookie 使用 `HttpOnly`、`SameSite=Lax`，HTTPS 下自动 `Secure`。
+- 密码使用 bcrypt，保留一次性明文密码迁移兼容。
+- 上传测试数据限制 zip 大小和解压总量。
+- `checker.cpp` 有源码大小限制，运行有独立时空限制。
 
-阅读程序和完善程序按“整题 + 小题”存储，公共代码只保存一次。单项选择题内部也是一个整题组，但前端会避免重复渲染整题 stem 与小题 stem。
+## 参考资料
 
-### 4.3 数据分析
-
-数据分析不额外建表，直接读取 `prelim_questions.tags_json` 和 `score`。
-
-统计输出：
-
-```text
-考点出现次数
-考点加权分值
-各年份考点加权分值对比
-```
-
-加权规则写在 `backend/routes/analytics.js` 中。
-
-## 5. 题面渲染
-
-前端提供轻量 Markdown 渲染器，并通过本地路径加载 KaTeX：
-
-```text
-/vendor/katex/katex.min.css
-/vendor/katex/katex.min.js
-```
-
-支持：
-
-```text
-$a+b$
-\(a+b\)
-$$a^2+b^2=c^2$$
-\[a^2+b^2=c^2\]
-```
-
-题面图片通过附件接口上传，Markdown 中只保存图片 URL，不写入 base64。
-
-## 6. 测试数据 zip 上传
-
-接口：
-
-```text
-POST /api/problems/:id/cases/zip
-```
-
-服务端会：
-
-1. 接收 zip；
-2. 忽略目录、`__MACOSX` 和非数据文件；
-3. 识别同名 `.in` 与 `.out/.ans`；
-4. 自然排序；
-5. 目录名写入 `subtask` 字段；
-6. 写入 `data/problems/<id>/testdata/`；
-7. 同步写入 `problem_cases`；
-8. 根据参数覆盖旧数据或追加数据；
-9. 可按测试点或子任务自动分配 100 分。
-
-## 7. Judge 设计
-
-当前 judge 有两层：
-
-```text
-GO_JUDGE_URL=http://127.0.0.1:5050
-```
-
-LiteOJ 固定通过 go-judge 编译和运行用户代码，同时保留自身的任务领取、评分和 checker 逻辑。公网同机部署时，`start.sh` 会让 Web 跑在 `app` 容器中、go-judge 跑在只绑定 `127.0.0.1` 的 `liteoj-go-judge` 容器中，judge worker 跑在宿主机上。更高安全要求时仍建议把 judge worker 或 go-judge 拆到独立主机/隔离 VM，并结合整体网络边界评估。
-
-`docker-compose.yml` 中的 `judge` 服务放在 `container-judge` profile 下，启用时同样调用 Compose 内的 go-judge 服务；该 profile 仅作为本地或可信内网的简化部署方式，不作为公网陌生提交的首选路径。
-
-评测结算支持：
-
-```text
-普通测试点通过即得分
-子任务整组得分
-标准比较 / 忽略空白 / 大小写不敏感 / 浮点误差
-```
-
-## 8. 前端路由
-
-前端为 SPA，所有页面由 `frontend/public/app.js` 根据 `location.pathname` 渲染。
-
-核心原则：
-
-- 使用 `data-route`；
-- 不使用 `javascript:` 链接；
-- 不在 HTML 属性里拼接未转义字符串；
-- 字符串题号统一通过 `encodeURIComponent` 处理；
-- 表格操作按钮放在内部 flex 容器中，`td` 保持 table-cell。
-
-## 9. 初始化种子
-
-初始化会导入：
-
-```text
-seed/problems/P1001
-seed/prelim/2019-CSP-J1.md
-...
-seed/prelim/2025-CSP-J1.md
-```
-
-A+B 示例题保留必要公式，标签只保留“模拟”。
-
-## 10. 终版设计取舍
-
-数据分析曾尝试引入地区分数线和联网同步，但该逻辑与初赛题库考点统计耦合过重，终版已移除。当前数据分析只基于已录入试卷和考点权重，结果更稳定、更适合教学备课。
+- [go-judge](https://github.com/criyle/go-judge)
+- [testlib](https://github.com/MikeMirzayanov/testlib)
+- [CMS Score types](https://cms.readthedocs.io/en/v1.5/Score%20types.html)
+- [Express static files](https://expressjs.com/en/starter/static-files.html)
+- [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)

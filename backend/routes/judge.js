@@ -2,6 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { db, DATA_DIR, problemFromRow } = require('../db');
+const { readCheckerSource } = require('../problem-files');
 
 const router = express.Router();
 const JUDGE_TOKEN = process.env.JUDGE_TOKEN || 'dev-judge-token';
@@ -37,12 +38,15 @@ router.post('/acquire', requireJudge, (req, res) => {
 
   const s = db.prepare('SELECT * FROM submissions WHERE id = ?').get(submissionId);
   const p = problemFromRow(db.prepare('SELECT * FROM problems WHERE id = ?').get(s.problem_id));
+  if (p.checkerMode === 'special_judge') p.checkerSource = readCheckerSource(p.id);
   const caseRows = db.prepare('SELECT * FROM problem_cases WHERE problem_id = ? ORDER BY sort, id').all(p.id);
   const cases = caseRows.map((c) => ({
     id: c.id,
     subtask: c.subtask || '',
     score: c.score,
     sort: c.sort,
+    timeLimit: c.time_limit || p.timeLimit,
+    memoryLimit: c.memory_limit || p.memoryLimit,
     input: readDataFile(c.input_path),
     output: readDataFile(c.output_path),
   }));

@@ -46,6 +46,8 @@ function migrate() {
       output_path TEXT NOT NULL,
       subtask TEXT NOT NULL DEFAULT '',
       score INTEGER NOT NULL DEFAULT 0,
+      time_limit INTEGER NOT NULL DEFAULT 0,
+      memory_limit INTEGER NOT NULL DEFAULT 0,
       sort INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(problem_id) REFERENCES problems(id) ON DELETE CASCADE
@@ -194,6 +196,8 @@ function migrate() {
   ensureColumn('problem_cases', 'output_path', "TEXT NOT NULL DEFAULT ''");
   ensureColumn('problem_cases', 'subtask', "TEXT NOT NULL DEFAULT ''");
   ensureColumn('problem_cases', 'score', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('problem_cases', 'time_limit', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('problem_cases', 'memory_limit', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('problem_cases', 'sort', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('problem_cases', 'created_at', "TEXT NOT NULL DEFAULT ''");
 
@@ -242,6 +246,8 @@ function caseFromRow(row) {
     outputPath: row.output_path,
     subtask: row.subtask || '',
     score: row.score,
+    timeLimit: row.time_limit || 0,
+    memoryLimit: row.memory_limit || 0,
     sort: row.sort,
     createdAt: row.created_at,
   };

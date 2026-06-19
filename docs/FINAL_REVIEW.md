@@ -1,156 +1,126 @@
-# LiteOJ 终版检查记录
+# LiteOJ 收尾检查记录
 
-更新版本：`1.3.0`。本次完善编程题评测系统，支持测试点给分、子任务分组、常用输出比较模式，并将生产评测执行器切换为 go-judge；此前的个人主页改密、安全响应头、密码哈希封装和数据分析页面收尾继续保留。
+更新时间：2026-06-19
 
-本记录用于说明当前终版前完成的整理、清理和验证事项。
+## 检查范围
 
-## 1. 功能边界确认
+本次收尾覆盖：
 
-当前导航栏：
+- 编程题库；
+- 题面编辑；
+- 测试数据管理；
+- Special Judge；
+- go-judge 评测链路；
+- 账号、个人改密和后台用户管理；
+- 提交记录；
+- CSP-J/S 初赛题库；
+- 初赛模考；
+- 数据分析；
+- 部署脚本和环境变量；
+- README 与 docs 文档。
 
-```text
-编程题库 | 提交记录 | 初赛题库 | 初赛模考 | 数据分析 | 后台管理
-```
+## 资料对照
 
-业务模块：
+本次按以下资料校准实现：
 
-- 编程题库：传统 OJ 训练；
-- 提交记录：查看提交和结果；
-- 初赛题库：CSP-J/S 第一轮练习；
-- 初赛模考：按试卷组卷和判分；
-- 数据分析：按年份和组别统计初赛考点；
-- 后台管理：题库、测试点、用户、初赛试卷管理。
+- go-judge：使用 `/run`、`copyIn`、`copyOut`、`copyOutCached` 的受限执行模型。
+- testlib：checker 使用 `registerTestlibCmd(argc, argv)`，约定 `inf`、`ouf`、`ans`。
+- CMS Score types：子任务/group 以整组结果决定分值。
+- OWASP Password Storage：密码使用 bcrypt，不保存明文。
+- Docker Compose 文档：服务编排、profile 和健康检查。
+- Express 文档：路由和静态资源服务。
 
-编程题评测增强：
+## 当前实现结论
 
-- 普通测试点通过即获得该测试点分值；
-- 测试点支持子任务分组，zip 子目录会自动映射为子任务；
-- 输出比较支持标准比较、忽略空白、大小写不敏感和浮点误差；
-- judge worker 统一通过 go-judge REST API 编译/运行用户代码。
-- 同机公网部署推荐 `./start.sh`：Web 使用 Docker Compose `app` 容器，go-judge 使用 `liteoj-go-judge` 容器，judge worker 在宿主机运行并调用 `127.0.0.1:5050`。
+### 编程题
 
-## 2. 已清理内容
+- 新增题目默认隐藏。
+- 新增流程为先编辑题面，再进入测试数据管理。
+- 题目详情页右上角只显示“编辑”。
+- 题面编辑不再展示输出比较和浮点误差。
+- Special Judge 在题面编辑中启用，在测试数据管理页上传 `checker.cpp`。
 
-上一轮数据分析试验中曾引入地区、晋级线、评级线、联网同步等复杂逻辑。终版已清理：
+### 测试数据
 
-- 删除分数线同步脚本；
-- 删除分数线种子数据；
-- 删除初始化脚本中的分数线导入逻辑；
-- 删除数据库新建分数线表逻辑；
-- 删除 package 中对应命令；
-- 清理压缩包中的运行态示例数据，保留 seed 作为唯一初始化来源；
-- 数据分析页面只保留年份、组别和三块统计结果。
+- zip 支持 `.in/.out` 和 `.in/.ans`。
+- zip 中 `checker.cpp` 会自动启用 Special Judge。
+- 测试点管理不加载输入输出正文。
+- 普通测试点按点计分。
+- 子任务按整组计分，组内全部通过才得分。
+- 支持多选测试点整体拖拽。
+- 支持测试点单独时空限制。
 
-旧数据库中如果曾经创建过分数线表，不影响当前系统运行，终版代码不会再读取或写入该表。
+### 评测
 
-## 3. 数据分析终版逻辑
+- Web 不执行用户代码。
+- 用户程序和 checker 都由 go-judge 编译/运行。
+- C++ 默认 O2，非 C++ 不显示 O2。
+- TLE/MLE/OLE/RE/CE/System Error 都在 runner 中归一化。
+- SPJ checker 编译失败或运行系统错误会返回 System Error。
 
-筛选：
+### 初赛题库和模考
 
-```text
-年份：下拉多选
-组别：CSP-J / CSP-S
-```
+- 初赛题库按题组展示阅读程序和完善程序。
+- 小题即时判题。
+- 模考可从试卷生成，提交后显示报告。
+- 数据分析使用已录入题库计算考点出现次数和加权分值。
 
-输出：
+### 账号和安全
 
-1. 考点出现次数柱状图；
-2. 考点加权分值中空饼图；
-3. 考点/年份对照表。
+- 登录/注册有基础限速。
+- 密码使用 bcrypt。
+- Cookie 使用 `HttpOnly`、`SameSite=Lax`，HTTPS 下自动 `Secure`。
+- API 禁用缓存。
+- judge 内部接口使用 `JUDGE_TOKEN`。
 
-加权规则：
+### 部署
 
-```text
-每个小题单独计算。
-1 个考点：该考点获得全部小题分值。
-2 个及以上考点：只取权重最高的两个，按二者权重比例分配分值。
-权重缺失或全为 0：最高两个考点平均分配。
-```
+- 统一入口为 `./start.sh`。
+- `start.sh` 支持安装、启动、停止、重启、日志和状态。
+- app 与 go-judge 使用 Docker Compose。
+- 宿主机 judge worker 调用 go-judge。
+- 国内镜像源、portable Node.js 和 go-judge 下载逻辑已保留。
+- SPJ 环境变量已同步到 `.env.example`、`scripts/deploy/env.sh`、`scripts/deploy/services.sh` 和 `docker-compose.yml`。
 
-## 4. UI 检查
+## 本次清理
 
-已整理：
+- 删除 README 中不存在的入口脚本说明。
+- 删除题面编辑里新增测试点的遗留前端函数。
+- 删除文档中输出比较、浮点误差等已不作为 UI 功能暴露的说明。
+- 重写 README、架构文档、部署文档、开发文档、使用手册和收尾检查。
+- 补全 API 清单和环境变量说明。
 
-- 表格操作按钮使用内部 `table-action-row`，避免 `td display:flex` 导致边框错位；
-- 后台题目管理按钮间距统一；
-- 初赛题库列表去掉重复分值和重复试卷来源小字；
-- 阅读程序、完善程序去掉重复“小题数量”说明；
-- 题型标签不换行；
-- 注册页密码提示精简；
-- 数据分析图例不再合并“其他”，所有考点展开显示；
-- Safari `backdrop-filter` 前缀顺序已处理；
-- 动态表单自动补充 id/name/label/aria-label。
+## 验证清单
 
-## 5. 路由与按钮检查
-
-已确认：
-
-- SPA 统一使用 `data-route`；
-- 不使用 `javascript:nav(...)`；
-- 后台新增题目走 `/admin/problem/new`；
-- 编辑走 `/admin/problem/:id/edit`；
-- 数据走 `/admin/problem/:id/data`；
-- 测试点删除使用稳定的 `data-problem-id` 和 `data-case-id`；
-- 字符串题号如 `P1001` 不会被当成数字。
-
-## 6. 初始化数据检查
-
-已确认：
-
-- P1001 A+B 只保留与题目相关的公式；
-- P1001 标签只保留 `模拟`；
-- 初始化会导入 2019～2025 CSP-J1 初赛试卷和解析；
-- 2022 等年份题号后的分值能正确解析。
-
-## 7. 评测系统检查
-
-已确认：
-
-- 数据库迁移会为旧库补充 `checker_mode`、`checker_tolerance` 和 `problem_cases.subtask`；
-- 后台新增/编辑题目可以保存输出比较配置；
-- 手动测试点和 zip 测试点都能保存子任务；
-- judge worker 会按测试点/子任务规则结算分数；
-- Docker Compose 默认可启动 Web `app` 和 `go-judge` 服务；
-- 容器内 judge 被放入 `container-judge` profile，仅作为本地或可信内网教学的简化模式，并默认调用 Compose 内 go-judge；
-- `start.sh` 会自动生成 `.env` 强随机密钥、检测 Docker/Node、启动 Web/go-judge 容器和宿主机 judge worker。
-
-## 8. 安全收尾检查
-
-已确认：
-
-- `NODE_ENV=production` 下缺少强 `JWT_SECRET` 会拒绝启动；
-- `NODE_ENV=production` 下缺少强 `JUDGE_TOKEN` 会拒绝启动；
-- 新数据库默认管理员为 `Algor / Wuchuanmin_2003`，生产部署前建议修改；
-- 生产环境注册接口不会把第一个注册用户提升为 admin；
-- 登录和注册接口有基础 IP 限速；
-- 测试数据 zip 同时限制压缩包大小和解压后总大小；
-- 默认 Compose 不再启动容器内 judge；go-judge 端口默认只绑定 `127.0.0.1`，公网评测路径统一走 go-judge。
-
-## 9. 测试命令
-
-终版检查命令：
+建议每次收尾执行：
 
 ```bash
 npm run check
 npm run smoke
-```
-
-完整真实链路测试：
-
-```bash
 npm run real-smoke
+docker compose config
+git diff --check
 ```
 
-完整测试：
+本次额外验证：
 
-```bash
-npm test
-```
+- go-judge `/version` 可访问；
+- `judgeTask` 直接执行 SPJ 任务；
+- 正确输出得到 `Accepted`；
+- 错误输出得到 `Wrong Answer`。
 
-## 10. 后续维护建议
+## 已知边界
 
-- 若继续扩展数据分析，建议仍然只围绕题库内部可靠数据，不要再次把地区分数线和联网爬取逻辑混入主流程。
-- 若需要分数线分析，建议做成独立模块或后台可维护表，不与考点分析耦合。
-- 若面向公网开放编程提交，优先升级 judge 沙箱。
-- 当前 `docker` 沙箱模式适合作为同机公网部署的基础能力；更高安全要求时建议把 judge 放在独立 VM/主机，并评估 isolate、nsjail、gVisor 或 Firecracker。
-- 若学生规模增大，建议拆分 Web 和 Judge，或增加多个 judge worker。
+- SQLite 适合单机教学场景，不适合高并发公网大规模比赛。
+- 内存限速器在多进程部署下不共享状态。
+- go-judge 容器需要特权模式，生产环境建议放在隔离主机或更强隔离边界内。
+- `checker.cpp` 由题目管理员上传，系统会限制编译/运行资源，但 checker 本身仍应审查。
+- CSP 初赛种子数据用于训练和解析展示，正式考试数据需由管理员自行核对。
+
+## 后续建议
+
+- 为 API 增加 OpenAPI 描述。
+- 为测试数据管理页增加批量删除和批量时空限制操作。
+- 为 judge worker 增加并发数配置。
+- 为提交记录增加筛选和分页。
+- 为管理员操作增加审计日志。

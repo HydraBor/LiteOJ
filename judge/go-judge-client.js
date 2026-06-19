@@ -125,6 +125,7 @@ function createGoJudgeExecution(language, task) {
   const client = new GoJudgeClient();
   const cachedFileIds = [];
   let executableFileId = null;
+  let checkerExecutableFileId = null;
   const sourceName = language.source;
   const executableName = language.executable;
   const sourceContent = task.submission.code;
@@ -176,6 +177,40 @@ function createGoJudgeExecution(language, task) {
     return normalized;
   }
 
+  async function compileChecker(source, testlibContent, options = {}) {
+    const cmd = {
+      ...commonCmd({
+        command: 'g++',
+        args: ['checker.cpp', '-O2', '-std=c++17', '-DONLINE_JUDGE', '-I.', '-o', 'checker'],
+        timeoutMs: options.timeoutMs || 10000,
+      }, {
+        timeoutMs: options.timeoutMs || 10000,
+        clockTimeoutMs: (options.timeoutMs || 10000) + 5000,
+        memoryLimitMb: options.memoryLimitMb || 512,
+      }),
+      copyIn: {
+        'checker.cpp': { content: source || '' },
+        'testlib.h': { content: testlibContent || '' },
+      },
+      copyOut: ['stdout', 'stderr'],
+      copyOutCached: ['checker'],
+    };
+    const [result] = await client.run({ cmd: [cmd] });
+    if (result?.fileIds) {
+      Object.values(result.fileIds).forEach((id) => {
+        if (id) cachedFileIds.push(id);
+      });
+      checkerExecutableFileId = result.fileIds.checker || null;
+    }
+    const normalized = normalizeResult(result);
+    if (normalized.code === 0 && !checkerExecutableFileId) {
+      normalized.code = -1;
+      normalized.systemError = true;
+      normalized.stderr = normalized.stderr || 'go-judge did not return compiled checker executable file id';
+    }
+    return normalized;
+  }
+
   async function run(runSpec, options = {}) {
     const copyIn = {};
     if (executableName) {
@@ -212,11 +247,49 @@ function createGoJudgeExecution(language, task) {
     return normalizeResult(result);
   }
 
+  async function runChecker(options = {}) {
+    if (!checkerExecutableFileId) {
+      return {
+        code: -1,
+        signal: null,
+        stdout: '',
+        stderr: 'compiled checker is not available',
+        timeMs: 0,
+        memoryKb: 0,
+        timeout: false,
+        outputLimitExceeded: false,
+        systemError: true,
+        status: 'Internal Error',
+      };
+    }
+    const cmd = {
+      ...commonCmd({
+        command: './checker',
+        args: ['input.txt', 'output.txt', 'answer.txt'],
+      }, {
+        timeoutMs: options.timeoutMs || 3000,
+        clockTimeoutMs: options.clockTimeoutMs || (Number(options.timeoutMs || 3000) + 1000),
+        memoryLimitMb: options.memoryLimitMb || 256,
+        stdoutMax: options.stdoutMax || 8192,
+        stderrMax: options.stderrMax || 8192,
+      }),
+      copyIn: {
+        checker: { fileId: checkerExecutableFileId },
+        'input.txt': { content: options.input || '' },
+        'output.txt': { content: options.output || '' },
+        'answer.txt': { content: options.answer || '' },
+      },
+      copyOut: ['stdout', 'stderr'],
+    };
+    const [result] = await client.run({ cmd: [cmd] });
+    return normalizeResult(result);
+  }
+
   async function cleanup() {
     await Promise.all([...new Set(cachedFileIds)].map((id) => client.deleteFile(id)));
   }
 
-  return { compile, run, cleanup };
+  return { compile, compileChecker, run, runChecker, cleanup };
 }
 
 module.exports = {

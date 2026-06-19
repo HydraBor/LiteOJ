@@ -140,7 +140,7 @@ assert(!outsideUiNamePattern.test(appJs) && !cssModuleNamePattern.test(appJs), '
 for (const fn of ['editProblem', 'openProblemData', 'toggleProblem', 'cloneProblem', 'deleteProblem', 'deleteCase', 'rejudgeProblem']) {
   assert(appJs.includes(`window.${fn}`), `missing ${fn}`);
 }
-for (const text of ['renderPrelimList', 'renderPrelimItem', 'renderPrelimAdmin', 'renderPrelimImport', 'renderMockHome', 'renderMockExam', 'renderMockReport', 'prelimOption', 'shouldShowPrelimGroupStem', 'sectionTitleFromGroups', 'numberedStem', 'questionScoreInline', 'questionPaperStem', 'renderMockExamSections', 'renderMockReportSections', 'formatScore', 'bindMockOptionEvents', 'mock-option-input', 'subquestion-meta', 'bindProblemManageActions', 'data-problem-action=\"toggle\"', 'data-problem-action=\"clone\"', 'problemCreateCaseSection', 'highlightCode', 'uploadProblemAttachment', 'currentProblemIdForAttachment']) {
+for (const text of ['renderPrelimList', 'renderPrelimItem', 'renderPrelimAdmin', 'renderPrelimImport', 'renderMockHome', 'renderMockExam', 'renderMockReport', 'prelimOption', 'shouldShowPrelimGroupStem', 'sectionTitleFromGroups', 'numberedStem', 'questionScoreInline', 'questionPaperStem', 'renderMockExamSections', 'renderMockReportSections', 'formatScore', 'bindMockOptionEvents', 'mock-option-input', 'subquestion-meta', 'bindProblemManageActions', 'data-problem-action=\"toggle\"', 'data-problem-action=\"clone\"', 'renderCheckerPanel', 'highlightCode', 'uploadProblemAttachment', 'currentProblemIdForAttachment']) {
   assert(appJs.includes(text), `frontend missing ${text}`);
 }
 
@@ -169,6 +169,7 @@ assert(appJs.includes('async function renderProfile') && appJs.includes('/api/pr
 assert(appJs.includes("routeAnchor('/profile'"), 'logged-in user box should link to the profile page');
 assert(!appJs.includes('<h1>提交记录</h1>'), 'submissions page should not render a redundant page title');
 assert(appJs.includes('clearSubmissionPoll') && appJs.includes('location.pathname !== expectedPath'), 'submission polling should stop refreshing after the user leaves the submission page');
+assert(appJs.includes('function formatUtc8Time') && appJs.includes('UTC+8'), 'submission times should be formatted explicitly as UTC+8');
 const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public', 'index.html'), 'utf8');
 assert(indexHtml.includes('/logo.svg'), 'index.html should apply the full logo');
 assert(indexHtml.includes('/logo-mark.svg'), 'index.html should apply the favicon mark');
@@ -179,10 +180,13 @@ assert(logoMark.includes('fill="white"'), 'selected logo mark should use a white
 assert(!logoMark.includes('lightning') && !logoMark.includes('bolt'), 'selected logo mark should be the clean L version, not the lightning concept');
 
 
-for (const endpoint of ["'/status'", "'/clone'", "'/rejudge'", "'/cases/zip'", "'/attachments'"]) {
+for (const endpoint of ["'/status'", "'/clone'", "'/rejudge'", "'/cases/zip'", "'/attachments'", "'/checker'"]) {
   assert(appJs.includes(endpoint), `frontend does not reference ${endpoint}`);
 }
-assert(appJs.includes("problemApi(problemId, '/cases')") && appJs.includes('renderCaseOverview') && appJs.includes('openCaseEditor'), 'testdata manager should render a lightweight grouped overview and lazy-load single case editors');
+assert(appJs.includes("problemApi(problemId, '/cases')") && appJs.includes("problemApi(problemId, '/cases/bulk')") && appJs.includes('renderCaseOverview') && appJs.includes('bindCaseDragAndDrop'), 'testdata manager should render a lightweight grouped overview and persist drag-and-drop case layout');
+assert(appJs.includes('caseSubtaskMode') && appJs.includes('manualCaseDraftItem') && !appJs.includes(`/cases/${'${caseId}'}?content=1`), 'testdata manager should expose global subtask/manual modes and avoid loading large case contents for editing');
+assert(appJs.includes('activeCaseDragRows') && appJs.includes('case-subtask-score-field') && appJs.includes('分值:<input') && !appJs.includes('测试数据管理：') && !appJs.includes('权重:'), 'testdata manager should use compact score-based subtask UI and multi-selected drag rows');
+assert(appJs.includes('name="specialJudge"') && appJs.includes('renderCheckerPanel') && appJs.includes("problemApi(problemId, '/checker')") && !appJs.includes('输出比较') && !appJs.includes('浮点误差'), 'problem editor and data manager should expose Special Judge without legacy compare/tolerance UI');
 
 const prelimRoutes = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'prelim.js'), 'utf8');
 for (const route of ["router.get('/items'", "router.get('/items/:id'", "router.post('/questions/:id/check'", "router.post('/import-md'", "router.get('/facets'", "router.get('/mock/papers'", "router.post('/mock/start'", "router.post('/mock/exams/:id/submit'", 'scoreTotalForMock', 'clampScoreToTotal']) {
@@ -226,11 +230,12 @@ const deployEnvScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'd
 const deployServiceScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy', 'services.sh'), 'utf8');
 const deployDockerScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy', 'docker.sh'), 'utf8');
 assert(oneClickScript.includes('scripts/deploy/services.sh'), 'start.sh should source modular deployment scripts');
-assert(!deployServiceScript.includes('JUDGE_EXECUTOR') && deployServiceScript.includes('GO_JUDGE_URL') && deployServiceScript.includes('GO_JUDGE_PROCESS_LIMIT') && deployServiceScript.includes('compose up -d --build app go-judge'), 'one-click script should start web plus go-judge and point the host judge worker at go-judge only');
+assert(!deployServiceScript.includes('JUDGE_EXECUTOR') && deployServiceScript.includes('GO_JUDGE_URL') && deployServiceScript.includes('GO_JUDGE_PROCESS_LIMIT') && deployServiceScript.includes('SPJ_TIMEOUT_MS') && deployServiceScript.includes('SPJ_MEMORY_LIMIT_MB') && deployServiceScript.includes('compose up -d --build app go-judge'), 'one-click script should start web plus go-judge and point the host judge worker at go-judge only');
 assert(deployServiceScript.includes('ensure_web_port_available') && deployServiceScript.includes('LITEOJ_AUTO_PORT'), 'start script should auto-select a free web port when the default port is occupied');
 assert(deployServiceScript.includes('ensure_go_judge_port_available') && deployServiceScript.includes('LITEOJ_GO_JUDGE_PORT_SCAN_END'), 'start script should auto-select a free go-judge port when 5050 is occupied');
 assert(deployServiceScript.includes('/dev/tcp/127.0.0.1/$port'), 'port detection should also probe loopback so WSL/Docker Desktop notices Windows-side listeners');
 assert(deployEnvScript.includes('ADMIN_USERNAME=Algor') && deployEnvScript.includes('ADMIN_PASSWORD=Wuchuanmin_2003'), 'one-click script should initialize the configured admin account');
+assert(deployEnvScript.includes('CHECKER_SOURCE_LIMIT=1') && deployEnvScript.includes('SPJ_TIMEOUT_MS=3000') && deployEnvScript.includes('SPJ_MEMORY_LIMIT_MB=256'), 'one-click script should initialize Special Judge limits');
 assert(deployEnvScript.includes('ensure_plain_key ADMIN_USERNAME Algor') && deployEnvScript.includes('is_placeholder "$(env_value ADMIN_PASSWORD)"'), 'one-click script should not reset existing admin credentials on every start');
 assert(deployServiceScript.includes('start_judge()') && deployServiceScript.includes('judge/worker.js'), 'one-click script should start a host judge worker');
 assert(deployDockerScript.includes('mirrors.tuna.tsinghua.edu.cn/docker-ce') && deployDockerScript.includes('docker.1ms.run') && deployDockerScript.includes('Preparing base image debian:bookworm-slim') && deployDockerScript.includes('prepare_go_judge_binary'), 'deployment should prefer domestic Docker apt/registry mirrors and prepare go-judge outside Docker Hub mirrors');
@@ -252,7 +257,7 @@ const routes = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', '
 assert(routes.includes('TESTDATA_UNZIPPED_LIMIT') && routes.includes('测试数据解压后总大小不能超过'), 'zip upload should limit total uncompressed testdata size');
 assert(routes.includes("['publish', 'public', 'show']") && routes.includes("['hide', 'hidden']"), 'problem batch visibility actions should accept configured action aliases');
 assert(routes.includes('copyAttachmentsAndRewriteDescription'), 'clone should copy and rewrite attachment URLs');
-for (const route of ["router.patch('/:id/status'", "router.post('/:id/status'", "router.post('/:id/clone'", "router.post('/:id/attachments'", "router.get('/:id/attachments/:filename'", "router.delete('/:id'", "router.get('/:id/cases'", "router.get('/:id/cases/:caseId'", "router.post('/:id/cases'", "router.post('/:id/cases/zip'", "router.delete('/:id/cases/:caseId'", "router.post('/:id/rejudge'", "router.post('/:id/submit'"]) {
+for (const route of ["router.patch('/:id/status'", "router.post('/:id/status'", "router.post('/:id/clone'", "router.post('/:id/attachments'", "router.get('/:id/attachments/:filename'", "router.get('/:id/checker'", "router.post('/:id/checker'", "router.delete('/:id/checker'", "router.delete('/:id'", "router.get('/:id/cases'", "router.get('/:id/cases/:caseId'", "router.post('/:id/cases'", "router.post('/:id/cases/zip'", "router.put('/:id/cases/bulk'", "router.delete('/:id/cases/:caseId'", "router.post('/:id/rejudge'", "router.post('/:id/submit'"]) {
   assert(routes.includes(route), `missing backend route ${route}`);
 }
 assert(appJs.includes('raw.replace(/\\\\\\\((.+?)\\\\\\\)/g') || appJs.includes('raw.replace(/\\\\\((.+?)\\\\\)/g'), 'inline markdown should support \\(...\\) KaTeX math');
@@ -302,13 +307,26 @@ for (const col of [
   "ensureColumn('problems', 'time_limit'",
   "ensureColumn('problems', 'checker_mode'",
   "ensureColumn('problem_cases', 'subtask'",
+  "ensureColumn('problem_cases', 'time_limit'",
+  "ensureColumn('problem_cases', 'memory_limit'",
   "ensureColumn('submissions', 'optimize'",
 ]) {
   assert(dbJs.includes(col), `database migration missing ${col}`);
 }
-assert(!appJs.includes('SCORING_MODES') && !appJs.includes('name="scoringMode"') && appJs.includes('CHECKER_MODES') && appJs.includes('name="checkerMode"') && appJs.includes('name="subtask"'), 'frontend should expose checker and subtask controls without OI/ACM scoring modes');
+assert(!appJs.includes('SCORING_MODES') && !appJs.includes('name="scoringMode"') && !appJs.includes('name="checkerMode"') && appJs.includes('name="specialJudge"') && appJs.includes('name="subtask"'), 'frontend should expose Special Judge and subtask controls without OI/ACM scoring modes or legacy checker mode select');
 const runnerJs = fs.readFileSync(path.join(__dirname, '..', 'judge', 'runner.js'), 'utf8');
+assert(fs.existsSync(path.join(__dirname, '..', 'judge', 'testlib.h')), 'vendored testlib.h should be available for Special Judge checker compilation');
 assert(!fs.existsSync(path.join(__dirname, '..', 'judge', 'sandbox.js')), 'legacy local sandbox implementation should be removed');
-assert(!runnerJs.includes('child_process') && !runnerJs.includes('JUDGE_EXECUTOR') && !runnerJs.includes('runProcess') && runnerJs.includes('createGoJudgeExecution'), 'judge runner should use go-judge as the only execution backend');
+assert(!runnerJs.includes('child_process') && !runnerJs.includes('JUDGE_EXECUTOR') && !runnerJs.includes('runProcess') && runnerJs.includes('createGoJudgeExecution') && runnerJs.includes('compileChecker') && runnerJs.includes('runChecker'), 'judge runner should use go-judge as the only execution backend, including Special Judge');
+const docsText = [
+  'README.md',
+  'docs/ARCHITECTURE.md',
+  'docs/DEPLOYMENT.md',
+  'docs/DEVELOPMENT.md',
+  'docs/USER_MANUAL.md',
+  'docs/FINAL_REVIEW.md',
+].map((file) => fs.readFileSync(path.join(__dirname, '..', file), 'utf8')).join('\n');
+assert(docsText.includes('Special Judge') && docsText.includes('checker.cpp') && docsText.includes('go-judge') && docsText.includes('SPJ_TIMEOUT_MS'), 'documentation should cover go-judge, Special Judge, checker.cpp, and SPJ deployment limits');
+assert(!docsText.includes('liteoj.sh') && !docsText.includes('浮点误差比较') && !docsText.includes('输出比较配置'), 'documentation should not keep retired launcher or legacy compare-mode wording');
 
 console.log('Smoke tests passed: programming problems, go-judge execution, and CSP preliminary question bank logic look consistent.');

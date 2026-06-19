@@ -1,6 +1,10 @@
+const fs = require('fs');
+const path = require('path');
 const languages = require('./languages');
 const { compareOutput } = require('./checker');
 const { createGoJudgeExecution } = require('./go-judge-client');
+
+const TESTLIB_PATH = path.join(__dirname, 'testlib.h');
 
 function applyScoring(details) {
   const totalPossible = details.reduce((sum, item) => sum + (Number(item.rawScore) || 0), 0);
@@ -40,7 +44,22 @@ function applyScoring(details) {
   return { status, score: totalScore, details, totalPossible };
 }
 
-function runResultToCase(runRes, task, test) {
+function checkerMessage(checkerRes, fallback) {
+  return (checkerRes?.stderr || checkerRes?.stdout || fallback || '').slice(0, 1000);
+}
+
+function applySpecialJudge(runRes, checkerRes) {
+  if (!checkerRes) return { status: 'System Error', message: 'checker did not run' };
+  if (checkerRes.timeout) return { status: 'System Error', message: 'checker timed out' };
+  if (checkerRes.memoryLimitExceeded) return { status: 'System Error', message: 'checker memory limit exceeded' };
+  if (checkerRes.outputLimitExceeded) return { status: 'System Error', message: 'checker output is too large' };
+  if (checkerRes.systemError) return { status: 'System Error', message: checkerMessage(checkerRes, 'checker execution system error') };
+  if (checkerRes.code === 0) return { status: 'Accepted', message: checkerMessage(checkerRes, '') };
+  if (checkerRes.code === 3) return { status: 'System Error', message: checkerMessage(checkerRes, 'checker failed') };
+  return { status: 'Wrong Answer', message: checkerMessage(checkerRes, `checker rejected output with exit code ${checkerRes.code}`) };
+}
+
+function runResultToCase(runRes, task, test, checkerRes = null) {
   let caseStatus = 'Accepted';
   let message = '';
   if (runRes.timeout) {
@@ -58,12 +77,21 @@ function runResultToCase(runRes, task, test) {
   } else if (runRes.code !== 0) {
     caseStatus = 'Runtime Error';
     message = (runRes.stderr || `exit code ${runRes.code}, signal ${runRes.signal || ''}`).slice(0, 1000);
-  } else if (!compareOutput(runRes.stdout, test.output, {
-    mode: task.problem.checkerMode || 'standard',
-    tolerance: task.problem.checkerTolerance,
-  })) {
-    caseStatus = 'Wrong Answer';
-    message = 'output differs from expected answer';
+  } else if (task.problem.checkerMode === 'special_judge') {
+    const verdict = applySpecialJudge(runRes, checkerRes);
+    caseStatus = verdict.status;
+    message = verdict.message;
+  } else {
+    const mode = ['ignore_space', 'case_insensitive', 'float'].includes(task.problem.checkerMode)
+      ? task.problem.checkerMode
+      : 'standard';
+    if (!compareOutput(runRes.stdout, test.output, {
+      mode,
+      tolerance: task.problem.checkerTolerance,
+    })) {
+      caseStatus = 'Wrong Answer';
+      message = 'output differs from expected answer';
+    }
   }
 
   return {
@@ -105,6 +133,23 @@ async function judgeTask(task) {
   let execution = null;
   try {
     execution = createGoJudgeExecution(language, task);
+    if (task.problem.checkerMode === 'special_judge') {
+      const checkerSource = String(task.problem.checkerSource || '');
+      if (!checkerSource.trim()) {
+        return { status: 'System Error', score: 0, message: 'Special Judge is enabled but checker.cpp is missing', details: [] };
+      }
+      const checkerCompileRes = await execution.compileChecker(checkerSource, fs.readFileSync(TESTLIB_PATH, 'utf8'), { timeoutMs: 10000, memoryLimitMb: 512 });
+      if (checkerCompileRes.systemError || checkerCompileRes.code !== 0 || checkerCompileRes.timeout) {
+        return {
+          status: 'System Error',
+          score: 0,
+          timeMs: checkerCompileRes.timeMs,
+          memoryKb: checkerCompileRes.memoryKb || 0,
+          message: (checkerCompileRes.stderr || checkerCompileRes.stdout || 'Special Judge checker.cpp compile failed').slice(0, 4000),
+          details: [],
+        };
+      }
+    }
     if (language.compile) {
       const compileSpec = language.compile('', { optimize: task.submission.optimize !== false });
       const compileRes = await execution.compile(compileSpec, { timeoutMs: compileSpec.timeoutMs || 10000, memoryLimitMb: 512 });
@@ -139,16 +184,26 @@ async function judgeTask(task) {
     }
 
     for (const test of cases) {
-      const timeoutMs = Number(task.problem.timeLimit || 1000);
+      const timeoutMs = Number(test.timeLimit || task.problem.timeLimit || 1000);
       const runRes = await execution.run(language.run(''), {
         input: test.input,
         timeoutMs,
-        memoryLimitMb: task.problem.memoryLimit,
+        memoryLimitMb: Number(test.memoryLimit || task.problem.memoryLimit || 128),
       });
       maxTime = Math.max(maxTime, runRes.timeMs);
       maxMemory = Math.max(maxMemory, runRes.memoryKb || 0);
 
-      const detail = runResultToCase(runRes, task, test);
+      let checkerRes = null;
+      if (task.problem.checkerMode === 'special_judge' && runRes.code === 0 && !runRes.timeout && !runRes.systemError && !runRes.memoryLimitExceeded && !runRes.outputLimitExceeded) {
+        checkerRes = await execution.runChecker({
+          input: test.input,
+          output: runRes.stdout,
+          answer: test.output,
+          timeoutMs: Number(process.env.SPJ_TIMEOUT_MS || 3000),
+          memoryLimitMb: Number(process.env.SPJ_MEMORY_LIMIT_MB || 256),
+        });
+      }
+      const detail = runResultToCase(runRes, task, test, checkerRes);
       details.push(detail);
       if (shouldStopJudging(detail.status)) break;
     }

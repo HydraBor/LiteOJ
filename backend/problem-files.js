@@ -33,6 +33,28 @@ function attachmentDir(problemId) {
   return dir;
 }
 
+function checkerSourcePath(problemId) {
+  return path.join(problemRoot(problemId), 'checker.cpp');
+}
+
+function hasCheckerSource(problemId) {
+  return fs.existsSync(checkerSourcePath(problemId));
+}
+
+function readCheckerSource(problemId) {
+  const file = checkerSourcePath(problemId);
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+}
+
+function writeCheckerSource(problemId, content) {
+  fs.mkdirSync(problemRoot(problemId), { recursive: true });
+  fs.writeFileSync(checkerSourcePath(problemId), content);
+}
+
+function deleteCheckerSource(problemId) {
+  fs.rmSync(checkerSourcePath(problemId), { force: true });
+}
+
 function sanitizeAttachmentFileName(filename) {
   const ext = path.extname(String(filename || '')).toLowerCase();
   const base = path.basename(String(filename || 'image'), ext).replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^_+|_+$/g, '') || 'image';
@@ -82,6 +104,11 @@ module.exports = {
   problemRoot,
   ensureProblemDir,
   attachmentDir,
+  checkerSourcePath,
+  hasCheckerSource,
+  readCheckerSource,
+  writeCheckerSource,
+  deleteCheckerSource,
   sanitizeAttachmentFileName,
   copyAttachmentsAndRewriteDescription,
   caseRelativePath,

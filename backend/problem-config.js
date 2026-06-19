@@ -1,4 +1,4 @@
-const CHECKER_MODES = new Set(['standard', 'ignore_space', 'case_insensitive', 'float']);
+const CHECKER_MODES = new Set(['standard', 'special_judge', 'ignore_space', 'case_insensitive', 'float']);
 
 function boolToInt(value) {
   return value ? 1 : 0;

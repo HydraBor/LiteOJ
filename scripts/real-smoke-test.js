@@ -71,31 +71,35 @@ async function main() {
     id: problemId,
     title: '烟测新增题',
     description: '# 题面\n\n输入两个整数，输出它们的和。',
-    difficulty: 'beginner',
-    timeLimit: 1000,
-    memoryLimit: 128,
-    checkerMode: 'ignore_space',
-    checkerTolerance: 0.000001,
-    tags: ['烟测', '加法'],
-    isPublic: true,
-  });
-  assert.strictEqual(created.problem.id, problemId, 'problem create should preserve string id');
-  assert.strictEqual(created.problem.checkerMode, 'ignore_space', 'problem create should save checker mode');
+	    difficulty: 'beginner',
+	    timeLimit: 1000,
+	    memoryLimit: 128,
+	    checkerMode: 'standard',
+	    tags: ['烟测', '加法'],
+	  });
+	  assert.strictEqual(created.problem.id, problemId, 'problem create should preserve string id');
+	  assert.strictEqual(created.problem.checkerMode, 'standard', 'problem create should save checker mode');
+	  assert.strictEqual(created.problem.isPublic, false, 'problem create should default to hidden');
 
   const updated = await request('PUT', `/api/problems/${encodeURIComponent(problemId)}`, {
     id: problemId,
     title: '烟测编辑题',
     description: '# 修改后的题面\n\n用于测试编辑保存。',
     difficulty: 'popular_minus',
-    timeLimit: 1200,
-    memoryLimit: 256,
-    checkerMode: 'float',
-    checkerTolerance: 0.00001,
-    tags: ['烟测', '编辑'],
-    isPublic: true,
-  });
-  assert.strictEqual(updated.problem.title, '烟测编辑题', 'problem edit should update title');
-  assert.strictEqual(updated.problem.checkerMode, 'float', 'problem edit should update checker mode');
+	    timeLimit: 1200,
+	    memoryLimit: 256,
+	    checkerMode: 'special_judge',
+	    tags: ['烟测', '编辑'],
+	    isPublic: true,
+	  });
+	  assert.strictEqual(updated.problem.title, '烟测编辑题', 'problem edit should update title');
+	  assert.strictEqual(updated.problem.checkerMode, 'special_judge', 'problem edit should update checker mode');
+
+	  const checkerSource = '#include "testlib.h"\nint main(int argc, char* argv[]) { registerTestlibCmd(argc, argv); long long x = ouf.readLong(); long long y = ans.readLong(); if (x != y) quitf(_wa, "expected %lld found %lld", y, x); quitf(_ok, "ok"); }\n';
+	  const checkerFd = new FormData();
+	  checkerFd.set('checker', new Blob([checkerSource], { type: 'text/x-c++src' }), 'checker.cpp');
+	  const checker = await request('POST', `/api/problems/${encodeURIComponent(problemId)}/checker`, checkerFd);
+	  assert.strictEqual(checker.hasChecker, true, 'checker upload should save checker.cpp');
 
   const addedCase = await request('POST', `/api/problems/${encodeURIComponent(problemId)}/cases`, {
     input: '1 2\n', output: '3\n', subtask: 'sample', score: 100, sort: 1,
@@ -112,14 +116,15 @@ async function main() {
   const zip = new AdmZip();
   zip.addFile('subtask1/1.in', Buffer.from('2 3\n'));
   zip.addFile('subtask1/1.out', Buffer.from('5\n'));
-  const fd = new FormData();
-  fd.set('replace', '1');
-  fd.set('autoScore', '1');
-  fd.set('file', new Blob([zip.toBuffer()], { type: 'application/zip' }), 'cases.zip');
-  const upload = await request('POST', `/api/problems/${encodeURIComponent(problemId)}/cases/zip`, fd);
-  assert.strictEqual(upload.imported, 1, 'zip case upload should import one pair');
-  cases = await request('GET', `/api/problems/${encodeURIComponent(problemId)}/cases?content=1`);
-  assert.strictEqual(cases.cases[0].subtask, 'subtask1', 'zip directory should become case subtask');
+	  const fd = new FormData();
+	  fd.set('replace', '1');
+	  fd.set('autoScore', '1');
+	  fd.set('subtaskMode', '1');
+	  fd.set('file', new Blob([zip.toBuffer()], { type: 'application/zip' }), 'cases.zip');
+	  const upload = await request('POST', `/api/problems/${encodeURIComponent(problemId)}/cases/zip`, fd);
+	  assert.strictEqual(upload.imported, 1, 'zip case upload should import one pair');
+	  cases = await request('GET', `/api/problems/${encodeURIComponent(problemId)}/cases?content=1`);
+	  assert.strictEqual(cases.cases[0].subtask, '子任务1', 'zip subtask mode should put imported cases into subtask 1');
 
   await request('POST', `/api/problems/${encodeURIComponent(problemId)}/status`, { isPublic: false });
   let publicList = await request('GET', '/api/problems');
@@ -128,8 +133,9 @@ async function main() {
   publicList = await request('GET', '/api/problems');
   assert(publicList.problems.some((p) => p.id === problemId), 'public problem should appear in public list');
 
-  const cloned = await request('POST', `/api/problems/${encodeURIComponent(problemId)}/clone`, { id: cloneId });
-  assert.strictEqual(cloned.problem.id, cloneId, 'clone should create requested string id');
+	  const cloned = await request('POST', `/api/problems/${encodeURIComponent(problemId)}/clone`, { id: cloneId });
+	  assert.strictEqual(cloned.problem.id, cloneId, 'clone should create requested string id');
+	  assert.strictEqual(cloned.problem.hasChecker, true, 'clone should copy checker.cpp');
 
   const submission = await request('POST', `/api/problems/${encodeURIComponent(problemId)}/submit`, {
     language: 'cpp17',

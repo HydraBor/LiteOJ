@@ -24,6 +24,10 @@ const {
   problemRoot,
   ensureProblemDir,
   attachmentDir,
+  hasCheckerSource,
+  readCheckerSource,
+  writeCheckerSource,
+  deleteCheckerSource,
   sanitizeAttachmentFileName,
   copyAttachmentsAndRewriteDescription,
   caseRelativePath,
@@ -34,7 +38,9 @@ const {
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Number(process.env.TESTDATA_ZIP_LIMIT || 50) * 1024 * 1024 } });
 const attachmentUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Number(process.env.ATTACHMENT_IMAGE_LIMIT || 5) * 1024 * 1024 } });
+const checkerUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Number(process.env.CHECKER_SOURCE_LIMIT || 1) * 1024 * 1024 } });
 const TESTDATA_UNZIPPED_LIMIT_BYTES = Number(process.env.TESTDATA_UNZIPPED_LIMIT || 200) * 1024 * 1024;
+const CHECKER_SOURCE_LIMIT_BYTES = Number(process.env.CHECKER_SOURCE_LIMIT || 1) * 1024 * 1024;
 
 function getParamId(req) { return requireProblemCode(req.params.id); }
 
@@ -57,6 +63,16 @@ function clearProblemCases(problemId) {
 function caseScore(value) {
   const n = Number(value);
   return Number.isFinite(n) ? Math.max(0, n) : 0;
+}
+
+function caseTimeLimit(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.max(100, Math.round(n)) : 0;
+}
+
+function caseMemoryLimit(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.max(16, Math.round(n)) : 0;
 }
 
 function subtaskScore(problemId, subtask) {
@@ -111,7 +127,7 @@ function validateProblemBody(body, existing = null) {
     memoryLimit,
     checkerMode,
     checkerTolerance,
-    isPublic: body.isPublic === undefined ? Boolean(existing?.is_public ?? true) : parseBoolean(body.isPublic, true),
+    isPublic: body.isPublic === undefined ? Boolean(existing?.is_public ?? false) : parseBoolean(body.isPublic, false),
   };
 }
 
@@ -161,6 +177,26 @@ function sendRouteError(res, err, next) {
   return next(err);
 }
 
+function problemWithChecker(row) {
+  const problem = problemFromRow(row);
+  if (problem) problem.hasChecker = hasCheckerSource(problem.id);
+  return problem;
+}
+
+function validateCheckerUpload(file) {
+  if (!file) throw Object.assign(new Error('请上传 checker.cpp'), { status: 400 });
+  const name = path.basename(String(file.originalname || '')).toLowerCase();
+  if (name !== 'checker.cpp' && path.extname(name) !== '.cpp') {
+    throw Object.assign(new Error('Special Judge 仅支持上传 checker.cpp / .cpp 源文件'), { status: 400 });
+  }
+  if (file.buffer.length > CHECKER_SOURCE_LIMIT_BYTES) {
+    throw Object.assign(new Error(`checker.cpp 不能超过 ${Math.round(CHECKER_SOURCE_LIMIT_BYTES / 1024 / 1024)} MB`), { status: 413 });
+  }
+  const source = file.buffer.toString('utf8');
+  if (!source.trim()) throw Object.assign(new Error('checker.cpp 不能为空'), { status: 400 });
+  return source;
+}
+
 router.get('/', (req, res) => {
   const adminMode = req.user?.role === 'admin' && (req.query.all === '1' || req.query.manage === '1');
   res.json({ problems: selectProblemList(req, adminMode) });
@@ -202,7 +238,7 @@ router.post('/', requireAdmin, (req, res, next) => {
       req.user.id,
     );
     ensureProblemDir(id);
-    res.json({ problem: problemFromRow(db.prepare('SELECT * FROM problems WHERE id = ?').get(id)) });
+    res.json({ problem: problemWithChecker(db.prepare('SELECT * FROM problems WHERE id = ?').get(id)) });
   } catch (err) {
     if (String(err.message).includes('UNIQUE')) return res.status(409).json({ error: '题号已存在' });
     return sendRouteError(res, err, next);
@@ -235,7 +271,7 @@ router.get('/:id', (req, res, next) => {
     const row = db.prepare('SELECT * FROM problems WHERE id = ?').get(id);
     if (!row) return res.status(404).json({ error: '题目不存在' });
     if (!row.is_public && req.user?.role !== 'admin') return res.status(403).json({ error: '题目未公开' });
-    const problem = problemFromRow(row);
+    const problem = problemWithChecker(row);
     const cases = req.user?.role === 'admin'
       ? db.prepare('SELECT id, subtask, score, sort, input_path AS inputPath, output_path AS outputPath FROM problem_cases WHERE problem_id = ? ORDER BY sort, id').all(id)
       : [];
@@ -264,7 +300,7 @@ router.put('/:id', requireAdmin, (req, res, next) => {
       boolToInt(data.isPublic),
       id,
     );
-    res.json({ problem: problemFromRow(db.prepare('SELECT * FROM problems WHERE id = ?').get(id)) });
+    res.json({ problem: problemWithChecker(db.prepare('SELECT * FROM problems WHERE id = ?').get(id)) });
   } catch (err) { return sendRouteError(res, err, next); }
 });
 
@@ -275,7 +311,7 @@ function updateProblemStatus(req, res, next) {
     if (!row) return res.status(404).json({ error: '题目不存在' });
     const isPublic = parseBoolean(req.body.isPublic, false);
     db.prepare('UPDATE problems SET is_public = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(boolToInt(isPublic), id);
-    res.json({ ok: true, problem: problemFromRow(db.prepare('SELECT * FROM problems WHERE id = ?').get(id)) });
+    res.json({ ok: true, problem: problemWithChecker(db.prepare('SELECT * FROM problems WHERE id = ?').get(id)) });
   } catch (err) { return sendRouteError(res, err, next); }
 }
 router.patch('/:id/status', requireAdmin, updateProblemStatus);
@@ -311,6 +347,7 @@ router.post('/:id/clone', requireAdmin, (req, res, next) => {
       );
       const cases = db.prepare('SELECT * FROM problem_cases WHERE problem_id = ? ORDER BY sort, id').all(fromId);
       const dir = ensureProblemDir(toId);
+      if (hasCheckerSource(fromId)) writeCheckerSource(toId, readCheckerSource(fromId));
       for (const [idx, c] of cases.entries()) {
         const inputFile = `${c.sort}_${idx + 1}.in`;
         const outputFile = `${c.sort}_${idx + 1}.out`;
@@ -318,13 +355,13 @@ router.post('/:id/clone', requireAdmin, (req, res, next) => {
         const outputPath = absoluteDataPath(c.output_path);
         fs.writeFileSync(path.join(dir, inputFile), fs.existsSync(inputPath) ? fs.readFileSync(inputPath) : Buffer.from(''));
         fs.writeFileSync(path.join(dir, outputFile), fs.existsSync(outputPath) ? fs.readFileSync(outputPath) : Buffer.from(''));
-        db.prepare('INSERT INTO problem_cases (problem_id, input_path, output_path, subtask, score, sort) VALUES (?, ?, ?, ?, ?, ?)')
-          .run(toId, caseRelativePath(toId, inputFile), caseRelativePath(toId, outputFile), c.subtask || '', c.score, c.sort);
+        db.prepare('INSERT INTO problem_cases (problem_id, input_path, output_path, subtask, score, sort, time_limit, memory_limit) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(toId, caseRelativePath(toId, inputFile), caseRelativePath(toId, outputFile), c.subtask || '', c.score, c.sort, c.time_limit || 0, c.memory_limit || 0);
       }
       rebalanceAllSubtasks(toId);
     });
     tx();
-    res.json({ problem: problemFromRow(db.prepare('SELECT * FROM problems WHERE id = ?').get(toId)) });
+    res.json({ problem: problemWithChecker(db.prepare('SELECT * FROM problems WHERE id = ?').get(toId)) });
   } catch (err) { return sendRouteError(res, err, next); }
 });
 
@@ -372,6 +409,38 @@ router.get('/:id/attachments/:filename', (req, res, next) => {
   } catch (err) { return sendRouteError(res, err, next); }
 });
 
+router.get('/:id/checker', requireAdmin, (req, res, next) => {
+  try {
+    const problemId = getParamId(req);
+    const row = db.prepare('SELECT checker_mode FROM problems WHERE id = ?').get(problemId);
+    if (!row) return res.status(404).json({ error: '题目不存在' });
+    res.json({ mode: normalizeCheckerMode(row.checker_mode), hasChecker: hasCheckerSource(problemId), filename: hasCheckerSource(problemId) ? 'checker.cpp' : '' });
+  } catch (err) { return sendRouteError(res, err, next); }
+});
+
+router.post('/:id/checker', requireAdmin, checkerUpload.single('checker'), (req, res, next) => {
+  try {
+    const problemId = getParamId(req);
+    const row = db.prepare('SELECT id FROM problems WHERE id = ?').get(problemId);
+    if (!row) return res.status(404).json({ error: '题目不存在' });
+    const source = validateCheckerUpload(req.file);
+    writeCheckerSource(problemId, source);
+    db.prepare("UPDATE problems SET checker_mode = 'special_judge', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(problemId);
+    res.json({ ok: true, mode: 'special_judge', hasChecker: true, filename: 'checker.cpp' });
+  } catch (err) { return sendRouteError(res, err, next); }
+});
+
+router.delete('/:id/checker', requireAdmin, (req, res, next) => {
+  try {
+    const problemId = getParamId(req);
+    const row = db.prepare('SELECT id FROM problems WHERE id = ?').get(problemId);
+    if (!row) return res.status(404).json({ error: '题目不存在' });
+    deleteCheckerSource(problemId);
+    db.prepare("UPDATE problems SET checker_mode = 'standard', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(problemId);
+    res.json({ ok: true, mode: 'standard', hasChecker: false });
+  } catch (err) { return sendRouteError(res, err, next); }
+});
+
 router.get('/:id/cases', requireAdmin, (req, res, next) => {
   try {
     const id = getParamId(req);
@@ -402,14 +471,29 @@ router.post('/:id/cases/zip', requireAdmin, upload.single('file'), (req, res, ne
     if (!req.file) return res.status(400).json({ error: '请上传 zip 文件' });
     const replace = parseBoolean(req.body.replace, true);
     const autoScore = parseBoolean(req.body.autoScore, true);
+    const subtaskMode = parseBoolean(req.body.subtaskMode, false);
     const zip = new AdmZip(req.file.buffer);
     const files = new Map();
     const ignored = [];
+    let checkerSource = '';
     let totalUnzippedBytes = 0;
     for (const entry of zip.getEntries()) {
       if (entry.isDirectory) continue;
       const rawName = String(entry.entryName || '').replace(/\\/g, '/');
       if (!rawName || rawName.includes('__MACOSX') || rawName.startsWith('.')) continue;
+      const filename = path.basename(rawName).toLowerCase();
+      if (filename === 'checker.cpp') {
+        totalUnzippedBytes += Number(entry.header?.size || 0);
+        if (totalUnzippedBytes > TESTDATA_UNZIPPED_LIMIT_BYTES) {
+          return res.status(413).json({ error: `测试数据解压后总大小不能超过 ${Math.round(TESTDATA_UNZIPPED_LIMIT_BYTES / 1024 / 1024)} MB` });
+        }
+        const data = entry.getData();
+        if (data.length > CHECKER_SOURCE_LIMIT_BYTES) {
+          return res.status(413).json({ error: `checker.cpp 不能超过 ${Math.round(CHECKER_SOURCE_LIMIT_BYTES / 1024 / 1024)} MB` });
+        }
+        checkerSource = data.toString('utf8');
+        continue;
+      }
       const ext = path.extname(rawName).toLowerCase();
       if (!['.in', '.out', '.ans'].includes(ext)) { ignored.push(rawName); continue; }
       totalUnzippedBytes += Number(entry.header?.size || 0);
@@ -424,7 +508,7 @@ router.post('/:id/cases/zip', requireAdmin, upload.single('file'), (req, res, ne
       if (ext === '.in') item.input = entry.getData();
       if (ext === '.out' || ext === '.ans') item.output = entry.getData();
       item.rawStem = key;
-      item.subtask = sanitizeSubtaskName(parts.length > 1 ? parts.slice(0, -1).join('/') : '');
+      item.subtask = sanitizeSubtaskName(subtaskMode ? '子任务1' : '');
     }
     const pairs = [...files.values()].filter((item) => item.input && item.output).sort((a, b) => compareNatural(a.rawStem, b.rawStem));
     const missing = [...files.values()].filter((item) => !item.input || !item.output).map((item) => item.rawStem);
@@ -450,6 +534,10 @@ router.post('/:id/cases/zip', requireAdmin, upload.single('file'), (req, res, ne
     const scoredSubtasks = new Set();
     const tx = db.transaction(() => {
       if (replace) clearProblemCases(problemId);
+      if (checkerSource.trim()) {
+        writeCheckerSource(problemId, checkerSource);
+        db.prepare("UPDATE problems SET checker_mode = 'special_judge', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(problemId);
+      }
       pairs.forEach((item, idx) => {
         const sort = startSort + idx;
         const safeStem = sanitizeDataFileName(item.rawStem || String(sort)).replace(/\.(in|out|ans)$/i, '') || String(sort);
@@ -464,12 +552,12 @@ router.post('/:id/cases/zip', requireAdmin, upload.single('file'), (req, res, ne
         } else if (autoScore) {
           score = unitScores.get(`case:${idx}`) || 0;
         }
-        db.prepare('INSERT INTO problem_cases (problem_id, input_path, output_path, subtask, score, sort) VALUES (?, ?, ?, ?, ?, ?)')
-          .run(problemId, caseRelativePath(problemId, inputFile), caseRelativePath(problemId, outputFile), item.subtask || '', score, sort);
+        db.prepare('INSERT INTO problem_cases (problem_id, input_path, output_path, subtask, score, sort, time_limit, memory_limit) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(problemId, caseRelativePath(problemId, inputFile), caseRelativePath(problemId, outputFile), item.subtask || '', score, sort, 0, 0);
       });
     });
     tx();
-    return res.json({ ok: true, imported: pairs.length, ignored, missing, replace, autoScore });
+    return res.json({ ok: true, imported: pairs.length, ignored, missing, replace, autoScore, subtaskMode, checkerImported: Boolean(checkerSource.trim()) });
   } catch (err) { return sendRouteError(res, err, next); }
 });
 
@@ -484,16 +572,66 @@ router.post('/:id/cases', requireAdmin, (req, res, next) => {
     const existingSubtaskScore = subtask ? subtaskScore(problemId, subtask) : 0;
     const requestedScore = caseScore(req.body.score);
     const score = subtask ? (requestedScore || existingSubtaskScore) : requestedScore;
+    const timeLimit = caseTimeLimit(req.body.timeLimit);
+    const memoryLimit = caseMemoryLimit(req.body.memoryLimit);
     const nextSort = Number(req.body.sort) || (db.prepare('SELECT COALESCE(MAX(sort), 0) + 1 AS s FROM problem_cases WHERE problem_id = ?').get(problemId).s || 1);
     const dir = ensureProblemDir(problemId);
     const inputFile = `${nextSort}.in`;
     const outputFile = `${nextSort}.out`;
     fs.writeFileSync(path.join(dir, inputFile), input);
     fs.writeFileSync(path.join(dir, outputFile), output);
-    const info = db.prepare('INSERT INTO problem_cases (problem_id, input_path, output_path, subtask, score, sort) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(problemId, caseRelativePath(problemId, inputFile), caseRelativePath(problemId, outputFile), subtask, score, nextSort);
+    const info = db.prepare('INSERT INTO problem_cases (problem_id, input_path, output_path, subtask, score, sort, time_limit, memory_limit) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(problemId, caseRelativePath(problemId, inputFile), caseRelativePath(problemId, outputFile), subtask, score, nextSort, timeLimit, memoryLimit);
     if (subtask) rebalanceSubtaskScores(problemId, subtask, info.lastInsertRowid, score);
     res.json({ case: { id: info.lastInsertRowid, problemId, subtask, score, sort: nextSort } });
+  } catch (err) { return sendRouteError(res, err, next); }
+});
+
+router.put('/:id/cases/bulk', requireAdmin, (req, res, next) => {
+  try {
+    const problemId = getParamId(req);
+    const problem = db.prepare('SELECT * FROM problems WHERE id = ?').get(problemId);
+    if (!problem) return res.status(404).json({ error: '题目不存在' });
+    const items = Array.isArray(req.body.cases) ? req.body.cases : [];
+    if (!items.length) return res.status(400).json({ error: '请提供测试点配置' });
+    const existingRows = db.prepare('SELECT id FROM problem_cases WHERE problem_id = ?').all(problemId);
+    const existingIds = new Set(existingRows.map((row) => Number(row.id)));
+    const seen = new Set();
+    const normalized = items.map((item, idx) => {
+      const id = Number(item.id);
+      if (!existingIds.has(id)) throw Object.assign(new Error(`测试点不存在：${id}`), { status: 400 });
+      if (seen.has(id)) throw Object.assign(new Error(`测试点重复：${id}`), { status: 400 });
+      seen.add(id);
+      return {
+        id,
+        subtask: sanitizeSubtaskName(item.subtask),
+        score: caseScore(item.score),
+        sort: Number(item.sort) || idx + 1,
+        timeLimit: caseTimeLimit(item.timeLimit),
+        memoryLimit: caseMemoryLimit(item.memoryLimit),
+      };
+    });
+
+    const tx = db.transaction(() => {
+      const update = db.prepare('UPDATE problem_cases SET subtask = ?, score = ?, sort = ?, time_limit = ?, memory_limit = ? WHERE id = ? AND problem_id = ?');
+      for (const item of normalized) {
+        update.run(item.subtask, item.subtask ? 0 : item.score, item.sort, item.timeLimit, item.memoryLimit, item.id, problemId);
+      }
+      const groups = new Map();
+      for (const item of normalized) {
+        if (!item.subtask) continue;
+        if (!groups.has(item.subtask)) groups.set(item.subtask, []);
+        groups.get(item.subtask).push(item);
+      }
+      for (const group of groups.values()) {
+        group.sort((a, b) => a.sort - b.sort || a.id - b.id);
+        const score = caseScore(group.find((item) => caseScore(item.score) > 0)?.score ?? group[0]?.score);
+        rebalanceSubtaskScores(problemId, group[0].subtask, group[0].id, score);
+      }
+    });
+    tx();
+    const rows = db.prepare('SELECT * FROM problem_cases WHERE problem_id = ? ORDER BY sort, id').all(problemId);
+    res.json({ ok: true, cases: rows.map(caseFromRow) });
   } catch (err) { return sendRouteError(res, err, next); }
 });
 
@@ -508,9 +646,11 @@ router.put('/:id/cases/:caseId', requireAdmin, (req, res, next) => {
     const subtask = req.body.subtask === undefined ? (row.subtask || '') : sanitizeSubtaskName(req.body.subtask);
     const existingGroupScore = subtask ? subtaskScore(problemId, subtask) : 0;
     const score = caseScore(req.body.score ?? (subtask ? existingGroupScore : row.score));
+    const timeLimit = req.body.timeLimit === undefined ? (row.time_limit || 0) : caseTimeLimit(req.body.timeLimit);
+    const memoryLimit = req.body.memoryLimit === undefined ? (row.memory_limit || 0) : caseMemoryLimit(req.body.memoryLimit);
     if (req.body.input !== undefined) fs.writeFileSync(absoluteDataPath(row.input_path), String(req.body.input));
     if (req.body.output !== undefined) fs.writeFileSync(absoluteDataPath(row.output_path), String(req.body.output));
-    db.prepare('UPDATE problem_cases SET subtask = ?, score = ?, sort = ? WHERE id = ?').run(subtask, subtask ? 0 : score, sort, caseId);
+    db.prepare('UPDATE problem_cases SET subtask = ?, score = ?, sort = ?, time_limit = ?, memory_limit = ? WHERE id = ?').run(subtask, subtask ? 0 : score, sort, timeLimit, memoryLimit, caseId);
     if (oldSubtask && oldSubtask !== subtask) rebalanceSubtaskScores(problemId, oldSubtask);
     if (subtask) rebalanceSubtaskScores(problemId, subtask, caseId, score);
     res.json({ case: caseWithSubtaskScore(problemId, db.prepare('SELECT * FROM problem_cases WHERE id = ?').get(caseId)) });

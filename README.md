@@ -1,72 +1,39 @@
 # LiteOJ
 
-LiteOJ 是一个轻量化在线评测系统，面向信奥训练和 CSP-J/S 初赛练习场景。项目保留最常用的 OJ 功能链路，额外提供 CSP-J/S 初赛题库、初赛模考和考点数据分析。
+LiteOJ 是一个面向信奥训练的轻量在线评测系统，包含编程题库、go-judge 评测、testlib 风格 Special Judge、CSP-J/S 初赛题库、初赛模考和考点数据分析。
 
-## 功能总览
+当前版本：`1.3.0`
 
-### 编程题库
+## 核心功能
 
-- 用户注册、登录、退出；管理员权限。
-- 编程题题库、题目详情、代码提交、提交记录。
-- 题面使用单个 Markdown 字段承载完整内容，支持 KaTeX、代码高亮和图片附件。
-- 后台支持新增、编辑、隐藏/公开、复制、删除题目。
-- 支持手动添加测试点，也支持 zip 批量上传 `.in + .out/.ans` 测试数据；zip 子目录会自动作为子任务分组。
-- 支持 C11、C++11、C++14、C++17、Python 3。
-- C++ 默认开启 O2，提交时可关闭；选择 C/Python 时不显示 O2。
-- 普通测试点按点给分；子任务按整组给分，组内测试点全部通过才获得该子任务分值。
-- 支持标准比较、忽略空白、大小写不敏感和浮点误差比较。
-- 独立 judge worker 负责领取任务、比较输出并回写 AC/WA/TLE/MLE/OLE/RE/CE/PA；生产部署默认把编译和运行交给 go-judge。
-
-### CSP-J/S 初赛题库
-
-- 初赛题库独立于编程题库。
-- 支持单项选择题、判断题、阅读程序、完善程序。
-- 单项选择题按单题展示；阅读程序和完善程序按“整题 + 小题”展示，公共代码块只出现一次。
-- 支持按年份、组别、题型、知识点和关键词筛选。
-- 点击选项后即时判题，并显示答案、解析和知识点 tag。
-- 初始化内置 2019～2025 CSP-J1 试卷和解析 Markdown。
-
-### 初赛模考
-
-- 可从初赛题库自动组卷。
-- 支持开始练习、提交判分、查看报告。
-- 模考总分以试卷官方总分为准，避免 Markdown 小题分值累加误差影响显示。
-
-### 数据分析
-
-- 位于导航栏“初赛模考”和“后台管理”之间。
-- 筛选条件只保留年份和组别，默认不预选。
-- 第一张图统计考点出现次数，按次数降序排列。
-- 第二张图统计考点加权分值，用中空饼图展示。
-- 第三块表格把各年份的考点加权分值并列展示，方便横向比较。
-- 加权分值规则：每个小题若只有一个考点，该考点获得该小题全部分值；若有两个及以上考点，只取权重最高的两个，并按二者权重比例分配该小题分值；若权重缺失或均为 0，则这两个考点平均分配。
+- 账号系统：注册、登录、退出、个人改密、管理员角色。
+- 编程题库：题目列表、题面详情、代码提交、提交记录、重测。
+- 题面编辑：Markdown + KaTeX + 代码高亮 + 图片附件。
+- 题目管理：新增、编辑、隐藏/公开、复制、删除；新增题目默认隐藏。
+- 测试数据：zip 导入 `.in/.out` 或 `.in/.ans`，手动录入测试点，测试点独立时空限制。
+- 评分模型：普通测试点按点得分；子任务按整组得分，组内测试点全部通过才获得该子任务分值。
+- Special Judge：上传 `checker.cpp`，使用 vendored `judge/testlib.h` 编译，参数顺序为 `input output answer`。
+- 评测执行：Web 与任务调度由 LiteOJ 负责，用户程序和 checker 编译运行全部交给 go-judge。
+- 语言：C11、C++11、C++14、C++17、Python 3；提交页默认 C++14，非 C++ 不显示 O2。
+- 初赛题库：支持单选、判断、阅读程序、完善程序，内置 CSP-J1 2019-2025 种子数据。
+- 初赛模考：从初赛题库生成试卷，提交后展示分数和报告。
+- 数据分析：按年份/组别统计考点出现次数、加权分值和年份对照表。
 
 ## 快速开始
 
-### 本地运行
-
-需要安装：
-
-- Node.js 22
-- gcc / g++
-- python3
+推荐在 Ubuntu 24.04 LTS 服务器上直接执行：
 
 ```bash
-npm install
-npm run init
-npm start
+git clone <your-repo-url> LiteOJ
+cd LiteOJ
+chmod +x ./start.sh
+./start.sh
 ```
 
-另开一个终端启动评测端：
-
-```bash
-npm run judge
-```
-
-访问：
+脚本会准备 `.env`、Docker、Docker Compose、portable Node.js、go-judge 二进制、国内镜像源和宿主机 judge worker。启动后访问：
 
 ```text
-http://localhost:3000
+http://127.0.0.1:3000
 ```
 
 默认管理员：
@@ -75,156 +42,189 @@ http://localhost:3000
 Algor / Wuchuanmin_2003
 ```
 
-### 同机一键部署
-
-推荐在云服务器上使用脚本启动 Web 和评测端：
-
-```bash
-./start.sh
-```
-
-脚本会自动生成或补齐 `.env`，检查 Docker、Docker Compose 和宿主机 Node.js；缺失时会尝试安装或准备 portable Node，并配置 Docker 国内镜像。若个别环境丢失可执行权限，可先运行 `chmod +x ./start.sh`。启动后的推荐结构是：
-
-```text
-Web: Docker Compose app 容器
-go-judge: Docker Compose 特权容器，监听 127.0.0.1:5050
-Judge: 宿主机 Node worker，通过 HTTP 调用 go-judge
-用户代码: 由 go-judge 在受限执行环境中编译/运行
-```
-
-已有旧数据库时，脚本不会覆盖数据库中的管理员密码。新库的初始管理员账号写在 `.env` 的 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 中，默认是 `Algor / Wuchuanmin_2003`。
-
-如果旧库管理员密码遗失，重建镜像后可执行：
+已有数据库不会因为 `.env` 中的 `ADMIN_PASSWORD` 改动而重置管理员密码。需要强制恢复时执行：
 
 ```bash
 docker compose exec app npm run reset-admin -- Algor Wuchuanmin_2003
 ```
 
-访问：
-
-```text
-http://localhost:3000
-```
-
-查看日志：
+## 启动命令
 
 ```bash
-./start.sh logs
+./start.sh          # 启动 app + go-judge + 宿主机 judge worker
+./start.sh status   # 查看容器和 judge worker 状态
+./start.sh logs     # 查看日志
+./start.sh restart  # 重启
+./start.sh stop     # 停止
+./start.sh install  # 仅安装/准备运行依赖
 ```
 
-停止：
+默认端口：
+
+- Web: `PORT=3000`
+- go-judge: `GO_JUDGE_PORT=5050`，只绑定 `127.0.0.1`
+
+若端口被占用，`start.sh` 会在配置范围内自动寻找下一个可用端口，并写回 `.env`。
+
+## 本地开发
 
 ```bash
-./start.sh stop
+npm install
+npm run init
+npm start
 ```
 
-查看状态：
+另开终端启动 judge worker：
 
 ```bash
-./start.sh status
+npm run judge
 ```
 
-### Docker Compose 手动运行
-
-启动 Web 和 go-judge 容器：
+开发机需要能访问 go-judge。最简单方式是：
 
 ```bash
-cp .env.example .env
-# 首次建库前修改 JWT_SECRET、JUDGE_TOKEN 和 ADMIN_PASSWORD
-./start.sh install
-docker compose up -d --build app go-judge
+docker compose up -d --build go-judge
+GO_JUDGE_URL=http://127.0.0.1:5050 npm run judge
 ```
 
-公网同机部署请优先使用 `./start.sh`，由脚本负责 go-judge 端口避让、镜像构建和宿主机 judge worker 启动。如果只是本地或可信内网教学，也可以显式启用容器内 judge profile：
+## 评测模型
 
-```bash
-docker compose --profile container-judge up -d --build
+1. 用户提交代码后，提交状态为 `Waiting`。
+2. judge worker 通过 `/api/judge/acquire` 领取任务。
+3. `judge/go-judge-client.js` 调用 go-judge `/run` 编译和运行用户程序。
+4. 若题目启用 Special Judge，先编译 `checker.cpp`，再对每个通过运行阶段的测试点执行 checker。
+5. `judge/runner.js` 汇总测试点结果并按普通测试点或子任务规则计分。
+6. judge worker 通过 `/api/judge/:id/result` 写回结果。
+
+Special Judge checker 使用 testlib 习惯写法：
+
+```cpp
+#include "testlib.h"
+
+int main(int argc, char* argv[]) {
+    registerTestlibCmd(argc, argv);
+    // inf: 输入文件，ouf: 用户输出，ans: 标准输出
+    quitf(_ok, "ok");
+}
 ```
 
-## 常用命令
+`checker.cpp` 可以在测试数据管理页单独上传，也可以放进测试数据 zip 根目录一并上传。
 
-```bash
-npm run init        # 初始化数据库、管理员、示例题和初赛种子卷
-npm start           # 启动 Web 服务
-npm run judge       # 启动评测端
-npm run check       # JS 语法检查
-npm run smoke       # 静态烟雾测试
-npm run real-smoke  # 启动临时服务并测试真实 API 链路
-npm test            # check + smoke + real-smoke
-```
+## 主要 API
+
+账号：
+
+- `GET /api/auth/me`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `POST /api/profile/password`
+
+编程题：
+
+- `GET /api/problems`
+- `GET /api/problems/facets`
+- `GET /api/problems/next-id`
+- `POST /api/problems`
+- `GET /api/problems/:id`
+- `PUT /api/problems/:id`
+- `POST /api/problems/:id/status`
+- `POST /api/problems/:id/clone`
+- `DELETE /api/problems/:id`
+- `POST /api/problems/:id/submit`
+- `POST /api/problems/:id/rejudge`
+
+题目资源：
+
+- `POST /api/problems/:id/attachments`
+- `GET /api/problems/:id/attachments/:filename`
+- `GET /api/problems/:id/checker`
+- `POST /api/problems/:id/checker`
+- `DELETE /api/problems/:id/checker`
+
+测试数据：
+
+- `GET /api/problems/:id/cases`
+- `GET /api/problems/:id/cases/:caseId`
+- `POST /api/problems/:id/cases`
+- `POST /api/problems/:id/cases/zip`
+- `PUT /api/problems/:id/cases/bulk`
+- `PUT /api/problems/:id/cases/:caseId`
+- `DELETE /api/problems/:id/cases/:caseId`
+
+提交：
+
+- `GET /api/submissions`
+- `GET /api/submissions/:id`
+- `POST /api/submissions/:id/rejudge`
+
+初赛题库、模考和数据分析：
+
+- `GET /api/prelim/papers`
+- `GET /api/prelim/facets`
+- `GET /api/prelim/items`
+- `GET /api/prelim/items/:id`
+- `GET /api/prelim/questions`
+- `GET /api/prelim/questions/:id`
+- `GET /api/prelim/papers/:id`
+- `POST /api/prelim/questions/:id/check`
+- `POST /api/prelim/import-md`
+- `DELETE /api/prelim/papers/:id`
+- `POST /api/prelim/items/:id/status`
+- `GET /api/prelim/mock/papers`
+- `POST /api/prelim/mock/start`
+- `GET /api/prelim/mock/exams/:id`
+- `POST /api/prelim/mock/exams/:id/submit`
+- `GET /api/prelim/mock/exams/:id/report`
+- `GET /api/analytics/prelim/options`
+- `GET /api/analytics/prelim/knowledge`
+
+后台和 judge：
+
+- `GET /api/admin/stats`
+- `GET /api/admin/users`
+- `PATCH /api/admin/users/:id/role`
+- `POST /api/judge/acquire`
+- `POST /api/judge/:id/result`
 
 ## 项目结构
 
 ```text
-LiteOJ/
-├── backend/
-│   ├── server.js              # Express 主服务和 API 挂载
-│   ├── db.js                  # SQLite 表结构、迁移和数据转换
-│   ├── auth.js                # 登录态、Cookie、安全配置和权限中间件
-│   ├── problem-utils.js       # 题号校验、题号排序、难度处理
-│   ├── prelim-utils.js        # CSP 初赛 Markdown 解析
-│   └── routes/
-│       ├── auth.js            # 登录、注册、退出、当前用户
-│       ├── problems.js        # 编程题、测试点、附件、提交入口
-│       ├── submissions.js     # 提交记录和提交详情
-│       ├── judge.js           # judge worker 领取任务和回传结果
-│       ├── prelim.js          # 初赛题库、模考、Markdown 导入
-│       ├── analytics.js       # 初赛考点统计分析
-│       └── admin.js           # 后台统计和用户管理
-├── frontend/public/
-│   ├── index.html             # 单页应用入口
-│   ├── app.js                 # 前端路由和页面渲染
-│   ├── style.css              # UI 样式
-│   ├── logo.svg               # 导航栏 Logo
-│   └── logo-mark.svg          # favicon / 登录页图标
-├── judge/
-│   ├── worker.js              # 评测端轮询任务
-│   ├── runner.js              # 编译、运行、逐点比较
-│   ├── go-judge-client.js     # go-judge REST API 执行适配
-│   ├── languages.js           # 语言配置
-│   └── checker.js             # 输出比较
-├── seed/
-│   ├── problems/              # 初始化编程题
-│   └── prelim/                # 2019～2025 CSP-J1 初赛 Markdown 和解析
-├── data/                      # SQLite 数据库、测试点和附件目录
-├── docs/                      # 开发文档和使用手册
-├── scripts/                   # 初始化和测试脚本
-├── Dockerfile
-├── Dockerfile.go-judge        # LiteOJ go-judge 镜像，内置 gcc/g++/python3
-├── docker-compose.yml
-├── start.sh                   # 同机部署一键启动/停止脚本
-├── liteoj.sh                  # 旧入口兼容转发脚本
-├── scripts/deploy/            # start.sh 拆分后的部署模块
-└── package.json
+backend/                 Express API、SQLite 迁移、鉴权和业务路由
+frontend/public/         单页前端、页面渲染和样式
+judge/                   judge worker、go-judge client、计分和 testlib.h
+scripts/                 初始化、测试、管理员恢复和部署脚本
+scripts/deploy/          start.sh 的模块化实现
+seed/                    示例编程题和 CSP 初赛种子数据
+docs/                    架构、部署、开发、使用和收尾文档
+Dockerfile               Web / host judge 共用镜像
+Dockerfile.go-judge      go-judge 镜像
+docker-compose.yml       app、go-judge、可选 container-judge
+start.sh                 统一启动入口
 ```
 
 ## 文档
 
+- [架构说明](docs/ARCHITECTURE.md)
+- [部署手册](docs/DEPLOYMENT.md)
 - [开发文档](docs/DEVELOPMENT.md)
 - [使用手册](docs/USER_MANUAL.md)
-- [部署手册](docs/DEPLOYMENT.md)
-- [架构说明](docs/ARCHITECTURE.md)
-- [终版检查记录](docs/FINAL_REVIEW.md)
+- [收尾检查](docs/FINAL_REVIEW.md)
 
-## 安全说明
+## 安全边界
 
-LiteOJ 统一使用 go-judge 执行评测：Web 跑在 Docker Compose `app` 容器中，`go-judge` 作为只绑定 `127.0.0.1` 的特权容器提供受限执行环境，judge worker 跑在宿主机上并只通过 HTTP 调用 go-judge。LiteOJ 自身负责任务领取、输出比较、测试点/子任务计分和结果回写。
+- `JWT_SECRET` 和 `JUDGE_TOKEN` 在生产环境必须使用强随机值。
+- 登录和注册有内存级限速。
+- Cookie 使用 `HttpOnly`、`SameSite=Lax`，HTTPS 请求下自动启用 `Secure`。
+- API 响应禁用缓存，静态资源使用短缓存。
+- go-judge 端口默认只绑定到 `127.0.0.1`。
+- 不要把 Docker socket 挂载进 Web 容器。
+- 测试数据 zip 有上传大小和解压总量限制，checker.cpp 有源码大小限制。
 
-同机部署仍不等于强隔离。更高安全等级的做法仍然是把 judge worker 放到独立主机或隔离 VM，并评估 isolate、nsjail、gVisor 或 Firecracker。不要把 Docker socket 挂给 Web 容器。
+## 参考资料
 
-正式部署建议：
-
-- 使用 HTTPS。
-- 修改 `.env` 中的 `JWT_SECRET`、`JUDGE_TOKEN` 和管理员账号密码；使用 `./start.sh` 时脚本会自动生成密钥并写入默认管理员。
-- Web 服务放在 Nginx 反向代理后面。
-- 公网同机部署时使用宿主机 judge + go-judge，不要把 go-judge 端口暴露到公网。
-- 新数据库默认管理员为 `Algor / Wuchuanmin_2003`，正式公开前建议登录后修改。
-- 保留登录/注册限速和测试数据 zip 解压总量限制。
-- 定期备份 `data/` 目录。
-- 不要以 root 权限长期运行 judge。
-
-## 版本状态
-
-当前版本：`1.3.0`。
-
-本版完善了编程题评测能力：支持测试点给分、子任务整组给分、常用输出比较模式，并把评测执行端切换为 go-judge；同时延续数据分析模块、账号安全和个人主页改密能力。
+- [go-judge](https://github.com/criyle/go-judge)
+- [testlib](https://github.com/MikeMirzayanov/testlib)
+- [CMS Score types](https://cms.readthedocs.io/en/v1.5/Score%20types.html)
+- [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+- [Docker Compose documentation](https://docs.docker.com/compose/)

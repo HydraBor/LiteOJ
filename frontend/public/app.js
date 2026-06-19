@@ -175,6 +175,27 @@ function updateMarkdownPreview(textarea, target) {
 
 function statusClass(status) { return String(status || '').split(' ')[0]; }
 
+function formatUtc8Time(value) {
+  if (!value) return '--';
+  const raw = String(value).trim();
+  const date = new Date(/Z$|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`);
+  if (Number.isNaN(date.getTime())) return raw;
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date).reduce((acc, part) => {
+    acc[part.type] = part.value;
+    return acc;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} UTC+8`;
+}
+
 const LUOGU_DIFFICULTIES = [
   { value: 'unrated', label: '暂无评定', className: 'unrated' },
   { value: 'beginner', label: '入门', className: 'red' },
@@ -199,19 +220,10 @@ function difficultyOptions(selected = '') {
   return LUOGU_DIFFICULTIES.map((d) => `<option value="${d.value}" ${value === d.value ? 'selected' : ''}>${d.label}</option>`).join('');
 }
 
-const CHECKER_MODES = [
-  { value: 'standard', label: '标准比较' },
-  { value: 'ignore_space', label: '忽略空白' },
-  { value: 'case_insensitive', label: '大小写不敏感' },
-  { value: 'float', label: '浮点误差' },
-];
-function optionFromList(items, selected = '') {
-  return items.map((item) => `<option value="${item.value}" ${selected === item.value ? 'selected' : ''}>${item.label}</option>`).join('');
+function checkerModeLabel(value) {
+  if (value === 'special_judge') return 'Special Judge';
+  return '标准输出';
 }
-function labelFromList(items, value, fallback = '默认') {
-  return items.find((item) => item.value === value)?.label || fallback;
-}
-function checkerModeLabel(value) { return labelFromList(CHECKER_MODES, value || 'standard', '标准比较'); }
 
 const SUBMISSION_LANGUAGES = [
   { value: 'cpp11', label: 'C++11' },
@@ -649,9 +661,9 @@ async function renderProblem(id) {
       <div class="problem-head row space">
         <div class="problem-heading">
           <h1 class="problem-title">${esc(p.id)} ${esc(p.title)}</h1>
-          <p class="problem-meta muted">时间限制：${p.timeLimit} ms　内存限制：${p.memoryLimit} MB　难度：${difficultyBadge(p.difficulty)}　计分：测试点/子任务得分　比较：${esc(checkerModeLabel(p.checkerMode))}</p>
+          <p class="problem-meta muted">时间限制：${p.timeLimit} ms　内存限制：${p.memoryLimit} MB　难度：${difficultyBadge(p.difficulty)}　计分：测试点/子任务得分　评测：${esc(checkerModeLabel(p.checkerMode))}</p>
         </div>
-        ${currentUser?.role === 'admin' ? `<div class="row actions">${routeLink(`/admin/problem/${problemUrl(p.id)}/edit`, '编辑', 'btn')}${routeLink(`/admin/problem/${problemUrl(p.id)}/data`, '测试数据', 'btn')}</div>` : ''}
+        ${currentUser?.role === 'admin' ? `<div class="row actions">${routeLink(`/admin/problem/${problemUrl(p.id)}/edit`, '编辑', 'btn')}</div>` : ''}
       </div>
       <div class="problem-tags">${(p.tags || []).map((t) => `<span class="problem-tag">${esc(t)}</span>`).join('')}${p.isPublic ? '' : '<span class="problem-tag warn">隐藏</span>'}</div>
       <div class="markdown problem-statement">${renderMarkdown(p.description || '暂无题面')}</div>
@@ -734,64 +746,441 @@ function groupCasesBySubtask(cases = []) {
   return groups;
 }
 
-function renderCaseGroup(problemId, problem, group, index, hasSubtasks) {
-  const title = hasSubtasks ? `子任务 ${index + 1}` : group.title;
-  const inheritedLimits = `继承题目限制：${problem.timeLimit || 1000} ms / ${problem.memoryLimit || 128} MB`;
-  const firstCaseId = group.cases[0]?.id;
-  return `<section class="case-group-card" data-subtask="${esc(group.subtask)}">
-    <div class="case-group-head">
-      <div>
-        <h3>${esc(title)}${group.subtask ? `<span>${esc(group.subtask)}</span>` : ''}</h3>
-        <p class="muted">${group.cases.length} 个测试点 · ${inheritedLimits}</p>
-      </div>
-      <div class="case-group-score"><b>${esc(formatScore(group.score))}</b><span>分</span></div>
+function caseEffectiveTime(problem, c = {}) {
+  return Number(c.timeLimit || 0) || Number(problem.timeLimit || 1000) || 1000;
+}
+
+function caseEffectiveMemory(problem, c = {}) {
+  return Number(c.memoryLimit || 0) || Number(problem.memoryLimit || 128) || 128;
+}
+
+function caseHelpIcon(text) {
+  return `<span class="help-icon" tabindex="0" data-tooltip="${esc(text)}">?</span>`;
+}
+
+function normalizeCaseGroups(cases = [], subtaskMode = false) {
+  if (!subtaskMode) return [{ name: '', score: 0, cases: cases.map((c) => ({ ...c, subtask: '' })) }];
+  const map = new Map();
+  const ensure = (name) => {
+    const key = name || '子任务1';
+    if (!map.has(key)) map.set(key, { name: key, score: 0, cases: [] });
+    return map.get(key);
+  };
+  ensure('子任务1');
+  for (const c of cases) {
+    const name = c.subtask || '子任务1';
+    const group = ensure(name);
+    group.cases.push({ ...c, subtask: name });
+    group.score += Number(c.score || 0);
+  }
+  return [...map.values()].filter((group, index) => index === 0 || group.cases.length);
+}
+
+function renderCaseRow(problemId, problem, c, index, subtaskMode) {
+  const timeValue = caseEffectiveTime(problem, c);
+  const memoryValue = caseEffectiveMemory(problem, c);
+  return `<div class="case-data-row" draggable="true" data-case-id="${esc(c.id)}">
+    <label class="case-select"><input type="checkbox" aria-label="选择测试点 ${index + 1}" /></label>
+    <span class="case-index">#${index + 1}</span>
+    <code class="case-file-name">${esc(caseFileName(c.inputPath))}</code>
+    <code class="case-file-name">${esc(caseFileName(c.outputPath))}</code>
+    <label class="case-mini-field"><input class="case-time-input" inputmode="numeric" value="${esc(timeValue)}" /></label>
+    <label class="case-mini-field"><input class="case-memory-input" inputmode="numeric" value="${esc(memoryValue)}" /></label>
+    ${subtaskMode ? '' : `<label class="case-mini-field case-score-field"><input class="case-score-input" inputmode="decimal" value="${esc(c.score || 0)}" /></label>`}
+    <div class="case-row-actions">
+      <button type="button" class="case-edit-btn" data-problem-id="${esc(problemId)}" data-case-id="${esc(c.id)}">编辑</button>
+      <button type="button" class="danger case-delete-btn" data-problem-id="${esc(problemId)}" data-case-id="${esc(c.id)}">删除</button>
     </div>
-    <div class="case-group-table-wrap">
-      <table class="case-group-table">
-        <thead><tr><th>#</th><th>输入文件</th><th>输出文件</th><th>分值</th><th>时间</th><th>内存</th><th>操作</th></tr></thead>
-        <tbody>${group.cases.map((c) => `<tr>
-          <td><span class="case-index">#${esc(c.sort)}</span></td>
-          <td><code>${esc(caseFileName(c.inputPath))}</code></td>
-          <td><code>${esc(caseFileName(c.outputPath))}</code></td>
-          <td>${esc(group.subtask ? (c.id === firstCaseId ? `${formatScore(group.score)}（子任务）` : '随子任务') : formatScore(c.score))}</td>
-          <td>${esc(problem.timeLimit || 1000)} ms</td>
-          <td>${esc(problem.memoryLimit || 128)} MB</td>
-          <td class="table-actions-cell case-row-actions">
-            <div class="table-action-row">
-              <button type="button" class="case-edit-btn" data-problem-id="${esc(problemId)}" data-case-id="${esc(c.id)}">编辑</button>
-              <button type="button" class="danger case-delete-btn" data-problem-id="${esc(problemId)}" data-case-id="${esc(c.id)}">删除</button>
-            </div>
-          </td>
-        </tr>
-        <tr class="case-editor-row"><td colspan="7"><div class="case-inline-editor" id="${esc(caseEditorId(c.id))}"></div></td></tr>`).join('')}</tbody>
-      </table>
+    <div class="case-inline-editor" id="${esc(caseEditorId(c.id))}"></div>
+  </div>`;
+}
+
+function renderPlainCaseList(problemId, problem, cases) {
+  return `<section class="case-plain-list" data-subtask="">
+    <div class="case-row-head">
+      <span><input type="checkbox" class="case-select-all" aria-label="选择全部测试点" /></span><span>#</span><span>输入文件</span><span>输出文件</span><span>时间限制 <small>ms</small></span><span>内存限制 <small>MB</small></span><span>分值</span><span>操作</span>
     </div>
+    <div class="case-drop-list">${cases.map((c, idx) => renderCaseRow(problemId, problem, c, idx, false)).join('')}</div>
   </section>`;
 }
 
-function renderCaseOverview(problemId, problem, cases = []) {
+function renderSubtaskGroup(problemId, problem, group, groupIndex, globalStartIndex, groupCount) {
+  const title = `子任务${groupIndex + 1}`;
+  return `<section class="case-subtask-card" data-subtask="${esc(title)}">
+    <div class="case-subtask-head">
+      <strong class="case-subtask-title">${esc(title)}</strong>
+      <label class="case-subtask-score-field">分值:<input class="case-subtask-score" inputmode="decimal" value="${esc(group.score || '')}" /><span>分</span></label>
+      <label>时间限制:<input class="case-subtask-fill-time" inputmode="numeric" placeholder="一键填充  ms" /></label>
+      <label>内存限制:<input class="case-subtask-fill-memory" inputmode="numeric" placeholder="一键填充  MB" /></label>
+      <button type="button" class="danger case-remove-subtask" ${groupCount <= 1 ? 'disabled' : ''}>删除子任务</button>
+    </div>
+    <div class="case-row-head case-subtask-row-head">
+      <span><input type="checkbox" class="case-select-all" aria-label="选择本子任务测试点" /></span><span>#</span><span>输入文件</span><span>输出文件</span><span>时间限制 <small>ms</small></span><span>内存限制 <small>MB</small></span><span>操作</span>
+    </div>
+    <div class="case-drop-list">${group.cases.map((c, idx) => renderCaseRow(problemId, problem, c, globalStartIndex + idx, true)).join('')}</div>
+  </section>`;
+}
+
+function renderSubtaskCaseList(problemId, problem, cases) {
+  const groups = normalizeCaseGroups(cases, true);
+  let offset = 0;
+  const html = groups.map((group, index) => {
+    const out = renderSubtaskGroup(problemId, problem, group, index, offset, groups.length);
+    offset += group.cases.length;
+    return out;
+  }).join('');
+  return `<div class="case-subtask-list" id="caseSubtaskList">${html}</div>
+    <button type="button" id="addSubtaskBtn" class="case-add-line"><span></span><b>⊕ 添加子任务</b><span></span></button>`;
+}
+
+function renderCaseOverview(problemId, problem, cases = [], subtaskMode = false) {
   if (!cases.length) {
     return `<div class="case-empty-state">
       <h3>暂无测试点</h3>
-      <p class="muted">上传 zip 或手动新增测试点后，这里会按子任务分组展示文件、分值和继承的时空限制。</p>
+      <p class="muted">上传 zip 或手动新增测试点后，这里会展示文件、分值和时空限制；点击编辑不会加载测试点正文。</p>
     </div>`;
   }
-  const groups = groupCasesBySubtask(cases);
-  const hasSubtasks = cases.some((c) => c.subtask);
+  const groups = normalizeCaseGroups(cases, subtaskMode);
   const totalScore = cases.reduce((sum, c) => sum + Number(c.score || 0), 0);
   return `<div class="case-overview">
     <div class="case-summary-strip">
       <div><b>${cases.length}</b><span>测试点</span></div>
-      <div><b>${groups.length}</b><span>${hasSubtasks ? '子任务' : '分组'}</span></div>
+      <div><b>${subtaskMode ? groups.length : '--'}</b><span>${subtaskMode ? '子任务' : '常规模式'}</span></div>
       <div><b>${formatScore(totalScore)}</b><span>总分</span></div>
-      <div><b>${hasSubtasks ? '开启' : '未开启'}</b><span>子任务模式</span></div>
+      <div><b>${subtaskMode ? '开启' : '未开启'}</b><span>子任务模式</span></div>
     </div>
     <div class="case-mode-note">
-      <span class="state-pill ${hasSubtasks ? 'state-public' : 'state-none'}">${hasSubtasks ? '子任务整组得分' : '普通测试点'}</span>
-      <p class="muted">${hasSubtasks ? '同一子任务内任意测试点失败时，该子任务不得分；子任务分值只按整组设置。' : '没有设置子任务名时，每个测试点独立计分。'}</p>
+      <span class="state-pill ${subtaskMode ? 'state-public' : 'state-none'}">${subtaskMode ? '子任务整组得分' : '普通测试点'}</span>
+      <p class="muted">${subtaskMode ? '同一子任务内全部测试点通过时，才获得该子任务分值。测试点可拖进不同子任务并按位置重排。' : '每个测试点独立计分，可直接编辑分值、时间限制和内存限制。'}</p>
     </div>
-    <div class="case-group-list">${groups.map((group, index) => renderCaseGroup(problemId, problem, group, index, hasSubtasks)).join('')}</div>
+    ${subtaskMode ? renderSubtaskCaseList(problemId, problem, cases) : renderPlainCaseList(problemId, problem, cases)}
+    <div class="case-layout-actions"><button type="button" id="saveCaseLayoutBtn" class="primary">保存测试点配置</button><span id="caseLayoutMsg"></span></div>
   </div>`;
+}
+
+function manualCaseDraftItem(index, problem, score = 0) {
+  return `<div class="case-manual-card">
+    <div class="row space"><b>测试点 #${index}</b><button type="button" class="case-manual-remove">删除</button></div>
+    <div class="grid two">
+      <div><label>测试输入</label><textarea name="caseInput" class="case-text"></textarea></div>
+      <div><label>测试输出</label><textarea name="caseOutput" class="case-text"></textarea></div>
+    </div>
+    <div class="grid three">
+      <div><label>时间限制</label><input name="caseTimeLimit" inputmode="numeric" value="${esc(problem.timeLimit || 1000)}" /><span class="input-unit">ms</span></div>
+      <div><label>内存限制</label><input name="caseMemoryLimit" inputmode="numeric" value="${esc(problem.memoryLimit || 128)}" /><span class="input-unit">MB</span></div>
+      <div><label>分值</label><input name="caseScore" inputmode="decimal" value="${esc(score)}" /></div>
+    </div>
+  </div>`;
+}
+
+function renderCheckerPanel(problem) {
+  const spjEnabled = problem.checkerMode === 'special_judge';
+  const statusClassName = spjEnabled && problem.hasChecker ? 'state-public' : 'state-none';
+  const statusText = spjEnabled ? (problem.hasChecker ? 'Special Judge 已启用' : 'Special Judge 待上传 checker.cpp') : '标准输出评测';
+  return `<div class="card case-checker-card">
+    <div class="row space case-checker-head">
+      <div>
+        <h2>评测器</h2>
+        <p class="muted small">标准输出适合答案唯一的题目；Special Judge 适合多解、构造、交互式输出格式检查等场景。</p>
+      </div>
+      <span class="state-pill ${statusClassName}">${esc(statusText)}</span>
+    </div>
+    <div class="case-checker-body">
+      <form id="checkerUploadForm" class="case-checker-upload">
+        ${filePicker('checker', 'checkerFileName', problem.hasChecker ? '替换 checker.cpp' : '上传 checker.cpp', '.cpp')}
+        <button type="submit" class="primary">保存评测器</button>
+      </form>
+      <button type="button" id="disableSpjBtn" class="danger" ${spjEnabled || problem.hasChecker ? '' : 'disabled'}>关闭 Special Judge</button>
+      <span id="checkerMsg" class="small"></span>
+    </div>
+    <p class="muted small">checker.cpp 使用 testlib 风格：<code>registerTestlibCmd(argc, argv)</code> 后读取 <code>inf</code>、<code>ouf</code>、<code>ans</code>；LiteOJ 会按 input、用户输出、标准输出的顺序传参。</p>
+  </div>`;
+}
+
+function bindCheckerPanel(problemId) {
+  const form = qs('#checkerUploadForm');
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      const fd = new FormData(form);
+      const res = await fetch(problemApi(problemId, '/checker'), { method: 'POST', body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      showInlineSuccess('#checkerMsg', 'checker.cpp 已保存，Special Judge 已启用');
+      setTimeout(() => nav(`/admin/problem/${problemUrl(problemId)}/data`), 500);
+    } catch (err) {
+      showInlineError('#checkerMsg', err);
+    }
+  });
+  qs('#disableSpjBtn')?.addEventListener('click', async () => {
+    if (!confirm('确认关闭 Special Judge 并删除 checker.cpp？')) return;
+    try {
+      await api(problemApi(problemId, '/checker'), { method: 'DELETE' });
+      showInlineSuccess('#checkerMsg', '已恢复标准输出评测');
+      setTimeout(() => nav(`/admin/problem/${problemUrl(problemId)}/data`), 500);
+    } catch (err) {
+      showInlineError('#checkerMsg', err);
+    }
+  });
+}
+
+function renumberManualCaseCards() {
+  qsa('.case-manual-card b').forEach((node, idx) => { node.textContent = `测试点 #${idx + 1}`; });
+}
+
+function renumberCaseRows() {
+  qsa('#caseOverviewMount .case-data-row').forEach((row, idx) => {
+    const index = qs('.case-index', row);
+    if (index) index.textContent = `#${idx + 1}`;
+  });
+  qsa('#caseOverviewMount .case-subtask-card').forEach((card, idx) => {
+    const name = `子任务${idx + 1}`;
+    card.dataset.subtask = name;
+    const title = qs('.case-subtask-title', card);
+    if (title) title.textContent = name;
+    qs('.case-remove-subtask', card)?.toggleAttribute('disabled', qsa('#caseOverviewMount .case-subtask-card').length <= 1);
+  });
+}
+
+function updateCaseSelectionHeaders() {
+  qsa('#caseOverviewMount .case-subtask-card, #caseOverviewMount .case-plain-list').forEach((scope) => {
+    const selectAll = qs('.case-select-all', scope);
+    if (!selectAll) return;
+    const boxes = qsa('.case-select input', scope);
+    const checked = boxes.filter((item) => item.checked).length;
+    selectAll.checked = boxes.length > 0 && checked === boxes.length;
+    selectAll.indeterminate = checked > 0 && checked < boxes.length;
+  });
+}
+
+function caseRowAfter(container, y) {
+  return qsa('.case-data-row:not(.dragging)', container).reduce((closest, child) => {
+    const box = child.getBoundingClientRect();
+    const offset = y - box.top - box.height / 2;
+    if (offset < 0 && offset > closest.offset) return { offset, element: child };
+    return closest;
+  }, { offset: Number.NEGATIVE_INFINITY, element: null }).element;
+}
+
+let activeCaseDragRows = [];
+
+function bindCaseDragAndDrop(root = document) {
+  qsa('.case-data-row', root).forEach((row) => {
+    if (row.dataset.dragBound === '1') return;
+    row.dataset.dragBound = '1';
+    const checkbox = qs('.case-select input', row);
+    checkbox?.addEventListener('change', () => {
+      row.classList.toggle('selected', checkbox.checked);
+      updateCaseSelectionHeaders();
+    });
+    row.classList.toggle('selected', Boolean(checkbox?.checked));
+    row.addEventListener('dragstart', (event) => {
+      const selected = qsa('#caseOverviewMount .case-data-row')
+        .filter((item) => qs('.case-select input', item)?.checked);
+      activeCaseDragRows = selected.includes(row) ? selected : [row];
+      activeCaseDragRows.forEach((item) => item.classList.add('dragging'));
+      event.dataTransfer?.setData('text/plain', row.dataset.caseId || '');
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      activeCaseDragRows.forEach((item) => item.classList.remove('dragging'));
+      activeCaseDragRows = [];
+      renumberCaseRows();
+      updateCaseSelectionHeaders();
+    });
+  });
+  qsa('.case-drop-list', root).forEach((list) => {
+    if (list.dataset.dropBound === '1') return;
+    list.dataset.dropBound = '1';
+    list.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      const moving = activeCaseDragRows.length ? activeCaseDragRows : qsa('.case-data-row.dragging');
+      if (!moving.length) return;
+      const after = caseRowAfter(list, event.clientY);
+      const fragment = document.createDocumentFragment();
+      moving.forEach((row) => fragment.appendChild(row));
+      if (after) list.insertBefore(fragment, after);
+      else list.appendChild(fragment);
+    });
+  });
+}
+
+function collectCaseLayout(subtaskMode) {
+  if (subtaskMode) {
+    const items = [];
+    let sort = 1;
+    qsa('#caseOverviewMount .case-subtask-card').forEach((card) => {
+      const subtask = card.dataset.subtask || '';
+      const groupScore = Number(qs('.case-subtask-score', card)?.value) || 0;
+      qsa('.case-data-row', card).forEach((row, idx) => {
+        items.push({
+          id: Number(row.dataset.caseId),
+          subtask,
+          score: idx === 0 ? groupScore : 0,
+          sort,
+          timeLimit: Number(qs('.case-time-input', row)?.value) || 0,
+          memoryLimit: Number(qs('.case-memory-input', row)?.value) || 0,
+        });
+        sort += 1;
+      });
+    });
+    return items;
+  }
+  return qsa('#caseOverviewMount .case-data-row').map((row, idx) => ({
+    id: Number(row.dataset.caseId),
+    subtask: '',
+    score: Number(qs('.case-score-input', row)?.value) || 0,
+    sort: idx + 1,
+    timeLimit: Number(qs('.case-time-input', row)?.value) || 0,
+    memoryLimit: Number(qs('.case-memory-input', row)?.value) || 0,
+  }));
+}
+
+function bindCaseOverviewActions(problemId) {
+  bindCaseDragAndDrop(qs('#caseOverviewMount') || document);
+  qsa('.case-select-all').forEach((input) => {
+    if (input.dataset.bound === '1') return;
+    input.dataset.bound = '1';
+    input.addEventListener('change', () => {
+      const scope = input.closest('.case-subtask-card') || input.closest('.case-plain-list') || qs('#caseOverviewMount');
+      qsa('.case-data-row', scope).forEach((row) => {
+        const checkbox = qs('.case-select input', row);
+        if (checkbox) checkbox.checked = input.checked;
+        row.classList.toggle('selected', input.checked);
+      });
+      updateCaseSelectionHeaders();
+    });
+  });
+  qsa('.case-edit-btn').forEach((btn) => {
+    if (btn.dataset.bound === '1') return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', () => openCaseEditor(btn.dataset.problemId || problemId, btn.dataset.caseId));
+  });
+  qsa('.case-delete-btn').forEach((btn) => {
+    if (btn.dataset.bound === '1') return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', () => deleteCase(btn.dataset.problemId || problemId, btn.dataset.caseId));
+  });
+  updateCaseSelectionHeaders();
+}
+
+function bindCaseManagerInteractions(problemId, problem, cases, initialSubtaskMode) {
+  let subtaskMode = Boolean(initialSubtaskMode);
+  const renderOverview = () => {
+    qs('#caseOverviewMount').innerHTML = renderCaseOverview(problemId, problem, cases, subtaskMode);
+    bindCaseOverviewActions(problemId);
+    bindSubtaskControls();
+  };
+  const bindSubtaskControls = () => {
+    const addBtn = qs('#addSubtaskBtn');
+    if (addBtn && addBtn.dataset.bound !== '1') addBtn.addEventListener('click', () => {
+      const list = qs('#caseSubtaskList');
+      if (!list) return;
+      const next = qsa('.case-subtask-card', list).length + 1;
+      list.insertAdjacentHTML('beforeend', renderSubtaskGroup(problemId, problem, { name: `子任务${next}`, score: 0, cases: [] }, next - 1, qsa('.case-data-row').length, next));
+      renumberCaseRows();
+      bindCaseOverviewActions(problemId);
+      bindSubtaskControls();
+    });
+    if (addBtn) addBtn.dataset.bound = '1';
+    qsa('.case-remove-subtask').forEach((btn) => {
+      if (btn.dataset.bound === '1') return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => {
+        const cards = qsa('#caseOverviewMount .case-subtask-card');
+        if (cards.length <= 1) return;
+        const card = btn.closest('.case-subtask-card');
+        const targetCard = cards.find((item) => item !== card) || cards[0];
+        const targetList = qs('.case-drop-list', targetCard);
+        if (card && targetList) qsa('.case-data-row', card).forEach((row) => targetList.appendChild(row));
+        card?.remove();
+        renumberCaseRows();
+        bindCaseOverviewActions(problemId);
+        bindSubtaskControls();
+      });
+    });
+    qsa('.case-subtask-fill-time').forEach((input) => {
+      if (input.dataset.bound === '1') return;
+      input.dataset.bound = '1';
+      input.addEventListener('change', () => {
+        if (!input.value) return;
+        qsa('.case-time-input', input.closest('.case-subtask-card')).forEach((x) => { x.value = input.value; });
+      });
+    });
+    qsa('.case-subtask-fill-memory').forEach((input) => {
+      if (input.dataset.bound === '1') return;
+      input.dataset.bound = '1';
+      input.addEventListener('change', () => {
+        if (!input.value) return;
+        qsa('.case-memory-input', input.closest('.case-subtask-card')).forEach((x) => { x.value = input.value; });
+      });
+    });
+    const saveBtn = qs('#saveCaseLayoutBtn');
+    if (saveBtn && saveBtn.dataset.bound !== '1') saveBtn.addEventListener('click', async () => {
+      try {
+        const body = { cases: collectCaseLayout(subtaskMode) };
+        await api(problemApi(problemId, '/cases/bulk'), { method: 'PUT', body });
+        showInlineSuccess('#caseLayoutMsg', '测试点配置已保存');
+        setTimeout(() => nav(`/admin/problem/${problemUrl(problemId)}/data`), 350);
+      } catch (err) {
+        showInlineError('#caseLayoutMsg', err);
+      }
+    });
+    if (saveBtn) saveBtn.dataset.bound = '1';
+  };
+
+  qsa('.case-mode-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const mode = btn.dataset.mode;
+      qsa('.case-mode-btn').forEach((x) => x.classList.toggle('active', x === btn));
+      qs('#zipCaseManagePanel').classList.toggle('hidden', mode !== 'zip');
+      qs('#manualCaseManagePanel').classList.toggle('hidden', mode !== 'manual');
+    });
+  });
+  const subtaskToggle = qs('#caseSubtaskMode');
+  subtaskToggle?.addEventListener('change', () => {
+    subtaskMode = Boolean(subtaskToggle.checked);
+    renderOverview();
+  });
+  const fileInput = qs('#caseZipForm input[type="file"]');
+  fileInput?.addEventListener('change', () => {
+    const box = qs('#caseZipNameBox');
+    if (box) box.value = fileInput.files?.[0]?.name || '';
+  });
+  qs('#addManualCaseBtn')?.addEventListener('click', () => {
+    const list = qs('#manualCaseList');
+    list?.insertAdjacentHTML('beforeend', manualCaseDraftItem(qsa('.case-manual-card', list).length + 1, problem, 0));
+    renumberManualCaseCards();
+  });
+  qs('#manualCasesForm')?.addEventListener('click', (event) => {
+    const btn = event.target.closest('.case-manual-remove');
+    if (!btn) return;
+    const cards = qsa('.case-manual-card');
+    if (cards.length <= 1) return;
+    btn.closest('.case-manual-card')?.remove();
+    renumberManualCaseCards();
+  });
+  qs('#manualCasesForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      const startSort = cases.length + 1;
+      const drafts = qsa('.case-manual-card').map((card, idx) => ({
+        input: qs('[name="caseInput"]', card)?.value || '',
+        output: qs('[name="caseOutput"]', card)?.value || '',
+        score: Number(qs('[name="caseScore"]', card)?.value) || 0,
+        timeLimit: Number(qs('[name="caseTimeLimit"]', card)?.value) || 0,
+        memoryLimit: Number(qs('[name="caseMemoryLimit"]', card)?.value) || 0,
+        sort: startSort + idx,
+      })).filter((item) => item.input || item.output);
+      for (const item of drafts) await api(problemApi(problemId, '/cases'), { method: 'POST', body: item });
+      showInlineSuccess('#caseMsg', `已新增 ${drafts.length} 组测试点`);
+      setTimeout(() => nav(`/admin/problem/${problemUrl(problemId)}/data`), 350);
+    } catch (err) {
+      showInlineError('#caseMsg', err);
+    }
+  });
+  bindCaseOverviewActions(problemId);
+  bindSubtaskControls();
 }
 
 async function renderSubmissions() {
@@ -805,7 +1194,7 @@ async function renderSubmissions() {
       <td>${esc(s.username)}</td>
       <td>${languageLabel(s.language)}</td>
       <td><span class="status ${statusClass(s.status)}">${esc(s.status)}</span></td>
-      <td>${s.score}</td><td>${s.timeMs} ms</td><td>${esc(s.createdAt)}</td>
+      <td>${s.score}</td><td>${s.timeMs} ms</td><td>${esc(formatUtc8Time(s.createdAt))}</td>
     </tr>`).join('')}</tbody></table></div>`;
 }
 
@@ -817,7 +1206,7 @@ async function renderSubmission(id) {
     <div class="card">
       <div class="row space"><h1>提交 #${s.id}</h1><button onclick="rejudge(${s.id})">重新评测</button></div>
       <p>题目：${esc(s.problemId)} ${esc(s.problemTitle)}　用户：${esc(s.username)}　语言：${languageLabel(s.language)}　O2优化：${s.optimize ? '开启' : '关闭'}</p>
-      <p>状态：<span class="status ${statusClass(s.status)}">${esc(s.status)}</span>　分数：${s.score}　时间：${s.timeMs} ms</p>
+      <p>状态：<span class="status ${statusClass(s.status)}">${esc(s.status)}</span>　分数：${s.score}　时间：${s.timeMs} ms　提交时间：${esc(formatUtc8Time(s.createdAt))}</p>
       ${s.message ? `<pre>${esc(s.message)}</pre>` : ''}
       <h3>测试点详情</h3>
       ${renderDetails(s.details || [])}
@@ -1616,8 +2005,8 @@ function collectProblemForm(form, existingId) {
     difficulty: f.difficulty || 'unrated',
     timeLimit: Number(f.timeLimit) || 1000,
     memoryLimit: Number(f.memoryLimit) || 128,
-    checkerMode: f.checkerMode || 'standard',
-    checkerTolerance: Number(f.checkerTolerance) || 0.000001,
+    checkerMode: form.querySelector('[name="specialJudge"]')?.checked ? 'special_judge' : 'standard',
+    checkerTolerance: 0.000001,
     isPublic: Boolean(form.querySelector('[name="isPublic"]')?.checked),
   };
 }
@@ -1643,30 +2032,11 @@ function bindFileNameDisplays(root = document) {
   });
 }
 
-function problemCreateCaseSection() {
-  return `<div data-form-name="testCases" class="form-block testcase-form-block">
-    <label class="editor-field-label">测试点</label>
-    <div class="segmented case-mode">
-      <button type="button" class="case-mode-btn active" data-mode="zip" onclick="setCaseInputMode('zip')">上传压缩包</button>
-      <button type="button" class="case-mode-btn" data-mode="manual" onclick="setCaseInputMode('manual')">手动录入测试点</button>
-    </div>
-    <div id="zipCasePanel" class="testcase-panel">
-      ${filePicker('zipFile', 'zipCaseFileName', '选择 zip 文件')}
-      <p class="muted upload-help">支持 .zip，自动识别同名 .in + .out/.ans；目录名会作为子任务，同一子任务只设置一个整组分值。</p>
-      <label class="checkbox-line"><input type="checkbox" name="zipAutoScore" checked /> 按测试点/子任务自动分配 100 分</label>
-    </div>
-    <div id="manualCasePanel" class="testcase-panel hidden">
-      <div id="importCasesBox">${importCaseItem('', '', '100')}</div>
-      <button type="button" class="add-block-btn" onclick="addImportCase()">＋ 新增测试点</button>
-    </div>
-  </div>`;
-}
-
 async function renderProblemEditor(id) {
   setImmersive(false);
   if (currentUser?.role !== 'admin') return renderLogin();
   const isNew = id === 'new';
-  let p = { id: '', title: '', description: '', tags: [], difficulty: 'beginner', timeLimit: 1000, memoryLimit: 128, checkerMode: 'standard', checkerTolerance: 0.000001, isPublic: true };
+  let p = { id: '', title: '', description: '', tags: [], difficulty: 'beginner', timeLimit: 1000, memoryLimit: 128, checkerMode: 'standard', checkerTolerance: 0.000001, isPublic: false, hasChecker: false };
   if (!isNew) p = (await api(problemApi(id))).problem;
   if (isNew) {
     try { p.id = (await api('/api/problems/next-id')).id; } catch (_) { p.id = ''; }
@@ -1689,24 +2059,22 @@ async function renderProblemEditor(id) {
             <div>${requiredLabel('时间限制 ms')}<input name="timeLimit" value="${esc(p.timeLimit)}" /></div>
             <div>${requiredLabel('内存限制 MB')}<input name="memoryLimit" value="${esc(p.memoryLimit)}" /></div>
           </div>
-          <div class="grid two">
-            <div>${requiredLabel('输出比较')}<select name="checkerMode">${optionFromList(CHECKER_MODES, p.checkerMode || 'standard')}</select></div>
-            <div><label>浮点误差</label><input name="checkerTolerance" value="${esc(p.checkerTolerance || 0.000001)}" placeholder="如 0.000001" /></div>
+          <div class="form-block spj-form-block">
+            <label class="checkbox-line publish-line"><input type="checkbox" name="specialJudge" ${p.checkerMode === 'special_judge' ? 'checked' : ''} /> 启用 Special Judge</label>
+            <p class="muted small">用于答案不唯一的题目。checker.cpp 使用 testlib 风格编写，在测试数据管理页上传；参数顺序为 input、用户输出、标准输出。</p>
+            ${!isNew ? `<span class="state-pill ${p.checkerMode === 'special_judge' && p.hasChecker ? 'state-public' : 'state-none'}">${p.checkerMode === 'special_judge' ? (p.hasChecker ? '已上传 checker.cpp' : '待上传 checker.cpp') : '标准输出评测'}</span>` : ''}
           </div>
           <label>标签，逗号分隔</label><input name="tags" value="${esc((p.tags || []).join(','))}" placeholder="例如 图论,LCA,树形DP" />
           ${mdEditor('description', '题面', p.description, { required: true, maxLength: 50000 })}
           <div class="form-block publish-form-block">
             <label class="checkbox-line publish-line"><input type="checkbox" name="isPublic" ${p.isPublic ? 'checked' : ''} /> 公开题目</label>
           </div>
-          ${isNew ? problemCreateCaseSection() : ''}
           <div id="editorMsg"></div>
           <div class="editor-footer"><button type="submit" class="primary editor-submit-btn">${isNew ? '创建题目' : '保存'}</button>${routeLink('/admin/problems', '取消', 'btn')}${!isNew ? routeLink(`/admin/problem/${problemUrl(p.id)}/data`, '管理测试点', 'btn') : ''}</div>
         </section>
       </form>
     </div>`;
   bindMarkdownPreviews(qs('#problemForm'));
-  bindFileNameDisplays(qs('#problemForm'));
-  if (isNew) renumberImportCases();
   qs('#problemForm').onsubmit = (e) => saveProblemEditor(e, p, isNew);
 }
 
@@ -1723,17 +2091,6 @@ async function saveProblemEditor(e, existingProblem, isNew) {
     const result = await api(url, { method, body });
     const problemId = result.problem.id;
     if (isNew) {
-      const manualPanel = qs('#manualCasePanel');
-      const isManual = manualPanel && !manualPanel.classList.contains('hidden');
-      if (isManual) {
-        const cases = collectImportCases(form);
-        for (const [idx, c] of cases.entries()) {
-          if (!c.input && !c.output) continue;
-          await api(problemApi(problemId, '/cases'), { method: 'POST', body: { ...c, sort: idx + 1 } });
-        }
-      } else {
-        await uploadImportZip(problemId, form);
-      }
       nav(`/admin/problem/${problemUrl(problemId)}/data`);
     } else {
       showInlineSuccess('#editorMsg', '保存成功');
@@ -1752,75 +2109,86 @@ async function renderCaseManager(problemId) {
   const pdata = await api(problemApi(problemId));
   const cdata = await api(problemApi(problemId, '/cases'));
   const cases = cdata.cases || [];
+  const initialSubtaskMode = cases.some((c) => c.subtask);
+  const zipNameKey = `liteoj.caseZipName:${problemId}`;
+  let savedZipName = '';
+  try { savedZipName = localStorage.getItem(zipNameKey) || ''; } catch {}
   app.innerHTML = `
     <div class="row space page-head">
-      <div><h1>测试数据管理：${esc(pdata.problem.id)}</h1><p class="muted">${esc(pdata.problem.title)}</p></div>
+      <div><h1>${esc(pdata.problem.id)} ${esc(pdata.problem.title)}</h1></div>
       <div class="row button-row">${routeLink(`/admin/problem/${problemUrl(problemId)}/edit`, '编辑题面', 'btn')}${routeLink(`/problem/${problemUrl(problemId)}`, '查看题目', 'btn')}</div>
     </div>
-    <div class="card">
-      <h2>zip 批量上传测试数据</h2>
-      <p class="muted">选择 zip 后会自动识别同名的 <code>.in</code> 与 <code>.out/.ans</code> 文件；zip 子目录会作为子任务名。同一子任务只设置一个整组分值。</p>
-      <form id="caseZipForm" class="zip-form">
-        ${filePicker('file', 'caseZipFileName', '选择 zip 文件')}
-        <label class="checkbox-line"><input type="checkbox" name="replace" checked /> 覆盖当前测试点</label>
-        <label class="checkbox-line"><input type="checkbox" name="autoScore" checked /> 按测试点/子任务自动分配 100 分</label>
-        <button class="primary">上传并解析</button>
-      </form>
-      <div id="zipMsg"></div>
-    </div>
-    <div class="card">
-      <h2>手动新增测试点</h2>
-      <form id="caseAddForm" class="grid two">
-        <div><label>输入数据</label><textarea name="input" class="case-text"></textarea></div>
-        <div><label>标准输出</label><textarea name="output" class="case-text"></textarea></div>
-        <div><label>子任务</label><input name="subtask" placeholder="可选，如 subtask1" /></div>
-        <div><label>分值</label><input name="score" value="${cases.length ? 0 : 100}" placeholder="填了子任务时表示整组分值" /></div>
-        <div><label>排序</label><input name="sort" placeholder="留空自动追加" /></div>
-        <p><button class="primary">添加测试点</button></p>
-      </form>
-      <div id="caseMsg"></div>
+    ${renderCheckerPanel(pdata.problem)}
+    <div class="card case-manager-card">
+      <div class="testcase-mode-header">
+        <label class="case-section-label required-label">测试点</label>
+        <div class="segmented case-mode">
+          <button type="button" class="case-mode-btn active" data-mode="zip">上传压缩包</button>
+          <button type="button" class="case-mode-btn" data-mode="manual">手动录入测试点</button>
+        </div>
+      </div>
+      <section id="zipCaseManagePanel" class="testcase-panel">
+        <form id="caseZipForm" class="zip-form case-upload-form">
+          <div class="case-upload-title">
+            <strong>上传测试点</strong>
+            ${caseHelpIcon('1. 仅支持上传 .zip 文件；\n2. 输入数据和输出数据必须成对出现，输入文件扩展名为 .in，输出文件扩展名为 .out；\n3. 测试点文件名中只允许字母和数字，例如 game001.in；\n4. 若是特判题，请将特判文件命名为 checker.cpp，打包在测试点压缩包中一起上传。')}
+          </div>
+          <div class="case-upload-line">
+            ${filePicker('file', 'caseZipFileName', '上传文件')}
+            <label class="checkbox-line"><input type="checkbox" name="replace" checked /> 覆盖当前测试点</label>
+            <button class="primary">上传并解析</button>
+          </div>
+          <input id="caseZipNameBox" class="case-zip-name-box" readonly placeholder="已上传测试点压缩包名称" value="${esc(savedZipName)}" />
+          <label class="checkbox-line case-subtask-toggle">
+            <input type="checkbox" id="caseSubtaskMode" ${initialSubtaskMode ? 'checked' : ''} />
+            子任务模式
+            ${caseHelpIcon('子任务评分模式下：\n每个子任务视为一个整体。\n子任务内全部测试点通过时，才会获得该子任务的分数。')}
+          </label>
+        </form>
+        <div id="zipMsg"></div>
+      </section>
+      <section id="manualCaseManagePanel" class="testcase-panel hidden">
+        <form id="manualCasesForm">
+          <div id="manualCaseList">${manualCaseDraftItem(1, pdata.problem, cases.length ? 0 : 100)}</div>
+          <button type="button" id="addManualCaseBtn" class="case-add-line"><span></span><b>⊕ 新增一组测试点</b><span></span></button>
+          <div class="case-layout-actions"><button class="primary">保存手动测试点</button><span id="caseMsg"></span></div>
+        </form>
+      </section>
     </div>
     <div class="card table-card case-overview-card">
-      <div class="table-headline"><h2>已有测试点</h2><span class="muted small">点击单个测试点的“编辑”后才会加载输入输出内容</span></div>
-      ${renderCaseOverview(problemId, pdata.problem, cases)}
+      <div class="table-headline"><h2>已有测试点</h2><span class="muted small">编辑测试点只修改元信息，不加载输入输出正文</span></div>
+      <div id="caseOverviewMount">${renderCaseOverview(problemId, pdata.problem, cases, initialSubtaskMode)}</div>
     </div>`;
   bindFileNameDisplays(qs('#caseZipForm'));
+  bindFileNameDisplays(qs('#checkerUploadForm'));
+  bindCheckerPanel(problemId);
+  bindCaseManagerInteractions(problemId, pdata.problem, cases, initialSubtaskMode);
   qs('#caseZipForm').onsubmit = async (e) => {
     e.preventDefault();
     try {
       const fd = new FormData(e.target);
       fd.set('replace', e.target.replace.checked ? '1' : '0');
-      fd.set('autoScore', e.target.autoScore.checked ? '1' : '0');
+      fd.set('autoScore', '1');
+      fd.set('subtaskMode', qs('#caseSubtaskMode')?.checked ? '1' : '0');
       const res = await fetch(problemApi(problemId, '/cases/zip'), { method: 'POST', body: fd });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || res.statusText);
-      qs('#zipMsg').innerHTML = `<div class="success">已导入 ${data.imported} 组测试点。${data.missing?.length ? `缺少配对文件：${data.missing.join(', ')}` : ''}</div>`;
+      const uploadedName = qs('#caseZipNameBox')?.value || '';
+      if (uploadedName) try { localStorage.setItem(zipNameKey, uploadedName); } catch {}
+      qs('#zipMsg').innerHTML = `<div class="success">已导入 ${data.imported} 组测试点。${data.checkerImported ? '已同步 checker.cpp 并启用 Special Judge。' : ''}${data.missing?.length ? `缺少配对文件：${data.missing.join(', ')}` : ''}</div>`;
       setTimeout(() => nav(`/admin/problem/${problemUrl(problemId)}/data`), 600);
     } catch (err) { showInlineError('#zipMsg', err); }
   };
-  qs('#caseAddForm').onsubmit = async (e) => {
-    e.preventDefault();
-    try {
-      const f = formData(e.target);
-      await api(problemApi(problemId, '/cases'), { method: 'POST', body: { input: f.input, output: f.output, subtask: f.subtask || '', score: Number(f.score) || 0, sort: Number(f.sort) || undefined } });
-      nav(`/admin/problem/${problemUrl(problemId)}/data`);
-    } catch (err) { showInlineError('#caseMsg', err); }
-  };
-  qsa('.case-edit-btn').forEach((btn) => {
-    btn.addEventListener('click', () => openCaseEditor(btn.dataset.problemId || problemId, btn.dataset.caseId));
-  });
-  qsa('.case-delete-btn').forEach((btn) => {
-    btn.addEventListener('click', () => deleteCase(btn.dataset.problemId || problemId, btn.dataset.caseId));
-  });
 }
 
 function renderCaseEditorBlock(problemId, c) {
   const scoreLabel = c.subtask ? '子任务分值' : '测试点分值';
   const scoreValue = c.subtask ? (c.subtaskScore ?? c.score) : c.score;
-  return `<form class="case-edit-form case-block" data-case-id="${esc(c.id)}">
-    <div class="row space"><h3>#${esc(c.sort)} 测试点</h3><button type="button" onclick="closeCaseEditor(${jsArg(c.id)})">收起</button></div>
-    <div class="grid two"><div><label>输入</label><textarea name="input" class="case-text">${esc(c.input)}</textarea></div><div><label>标准输出</label><textarea name="output" class="case-text">${esc(c.output)}</textarea></div></div>
+  return `<form class="case-edit-form case-block case-meta-editor" data-case-id="${esc(c.id)}">
+    <div class="row space"><h3>#${esc(c.sort)} 测试点元信息</h3><button type="button" onclick="closeCaseEditor(${jsArg(c.id)})">收起</button></div>
+    <p class="muted">这里只修改文件归组、分值、排序和时空限制，不加载输入/输出正文。</p>
     <div class="grid three"><div><label>子任务</label><input name="subtask" value="${esc(c.subtask || '')}" placeholder="可选" /></div><div><label>${scoreLabel}</label><input name="score" value="${esc(scoreValue)}" /></div><div><label>排序</label><input name="sort" value="${esc(c.sort)}" /></div></div>
+    <div class="grid two"><div><label>时间限制 ms</label><input name="timeLimit" value="${esc(c.timeLimit || '')}" placeholder="留空继承题目" /></div><div><label>内存限制 MB</label><input name="memoryLimit" value="${esc(c.memoryLimit || '')}" placeholder="留空继承题目" /></div></div>
     <p><button>保存测试点</button></p>
   </form>`;
 }
@@ -1834,15 +2202,15 @@ async function openCaseEditor(problemId, caseId) {
       mount.dataset.loaded = '0';
       return null;
     }
-    mount.innerHTML = '<div class="muted case-editor-loading">正在加载测试点内容...</div>';
-    const data = await api(problemApi(problemId, `/cases/${caseId}?content=1`));
+    mount.innerHTML = '<div class="muted case-editor-loading">正在加载测试点元信息...</div>';
+    const data = await api(problemApi(problemId, `/cases/${caseId}`));
     mount.innerHTML = renderCaseEditorBlock(problemId, data.case);
     mount.dataset.loaded = '1';
     const form = qs('.case-edit-form', mount);
     form.onsubmit = async (e) => {
       e.preventDefault();
       const f = formData(e.target);
-      await api(problemApi(problemId, `/cases/${caseId}`), { method: 'PUT', body: { input: f.input, output: f.output, subtask: f.subtask || '', score: Number(f.score) || 0, sort: Number(f.sort) || 0 } });
+      await api(problemApi(problemId, `/cases/${caseId}`), { method: 'PUT', body: { subtask: f.subtask || '', score: Number(f.score) || 0, sort: Number(f.sort) || 0, timeLimit: Number(f.timeLimit) || 0, memoryLimit: Number(f.memoryLimit) || 0 } });
       nav(`/admin/problem/${problemUrl(problemId)}/data`);
     };
     return data;
@@ -1890,43 +2258,6 @@ window.rejudgeProblem = async (id) => runUiAction(
   () => api(problemApi(id, '/rejudge'), { method: 'POST', body: {} }),
   (result) => alert(`已重置 ${result.changed} 条提交为等待评测。`),
 );
-
-function importCaseItem(input = '', output = '', score = '', subtask = '') {
-  return `<div class="case-draft-item">
-    <div class="row space"><b>测试点</b><button type="button" onclick="this.closest('.case-draft-item').remove(); renumberImportCases();">删除</button></div>
-    <div class="grid two"><div><label>输入</label><textarea name="caseInput" class="case-text">${esc(input)}</textarea></div><div><label>标准输出</label><textarea name="caseOutput" class="case-text">${esc(output)}</textarea></div></div>
-    <div class="grid two"><div><label>子任务</label><input name="caseSubtask" value="${esc(subtask)}" placeholder="可选，如 subtask1" /></div><div><label>分值</label><input name="caseScore" value="${esc(score)}" placeholder="填了子任务时表示整组分值" /></div></div>
-  </div>`;
-}
-window.renumberImportCases = () => qsa('.case-draft-item b').forEach((x, i) => { x.textContent = `测试点 #${i + 1}`; });
-window.addImportCase = (input = '', output = '', score = '', subtask = '') => { qs('#importCasesBox').insertAdjacentHTML('beforeend', importCaseItem(input, output, score, subtask)); renumberImportCases(); };
-window.setCaseInputMode = (mode) => {
-  qsa('.case-mode-btn').forEach((x) => x.classList.toggle('active', x.dataset.mode === mode));
-  qs('#zipCasePanel').classList.toggle('hidden', mode !== 'zip');
-  qs('#manualCasePanel').classList.toggle('hidden', mode !== 'manual');
-};
-
-function collectImportCases(form) {
-  return qsa('.case-draft-item', form).map((item) => ({
-    input: qs('[name="caseInput"]', item).value,
-    output: qs('[name="caseOutput"]', item).value,
-    subtask: qs('[name="caseSubtask"]', item)?.value || '',
-    score: Number(qs('[name="caseScore"]', item).value) || 0,
-  })).filter((c) => c.input || c.output);
-}
-
-async function uploadImportZip(problemId, form) {
-  const fileInput = qs('[name="zipFile"]', form);
-  if (!fileInput?.files?.length) return null;
-  const fd = new FormData();
-  fd.set('file', fileInput.files[0]);
-  fd.set('replace', '1');
-  fd.set('autoScore', qs('[name="zipAutoScore"]', form)?.checked ? '1' : '0');
-  const res = await fetch(problemApi(problemId, '/cases/zip'), { method: 'POST', body: fd });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || res.statusText);
-  return data;
-}
 
 async function render() {
   try {

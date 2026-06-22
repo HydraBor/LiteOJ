@@ -223,7 +223,7 @@ checker 退出码：
 
 ## 初赛题库开发
 
-初赛数据由 `seed/prelim/*.md` 初始化，也可后台导入。
+初赛数据由 `seed/prelim/*.md` 初始化，也可后台导入。标准卷面和解析格式见 `docs/PRELIM_IMPORT_TEMPLATE.md`。
 
 导入要求：
 
@@ -239,12 +239,39 @@ npm run smoke
 npm run real-smoke
 ```
 
+答案解析中的标签必须使用固定 slug 格式：
+
+```md
+**考点与权重：** language-basics: 70%, bitwise: 30%
+```
+
+解析规则：
+
+- `slug` 只能来自 `seed/tag-schema.json`；
+- 权重写成数字，可带 `%`；
+- 多个标签用英文逗号、中文逗号、分号或中文分号分隔；
+- 不识别中文名、别名或自由文本。遇到未知 slug 时导入直接失败。
+
+## 标签系统开发
+
+统一标签词典位于 `seed/tag-schema.json`。
+
+规则：
+
+- `slug` 是唯一稳定 ID；
+- `nameZh` 是唯一中文展示名；
+- 编程题编辑页只提交 slug；
+- 初赛导入后同步 `oj_prelim_question_tags`；
+- 编程题保存后同步 `oj_problem_tags`。
+
+新增标签时优先追加到 `seed/tag-schema.json`，不要直接把自由文本写入题目数据。
+
 ## 数据分析规则
 
 `/api/analytics/prelim/knowledge` 使用当前题库数据计算：
 
 - 考点出现次数：每小题内去重后计数；
-- 加权分值：一个考点得满分，两个及以上考点取权重最高的两个；
+- 加权分值：按 canonical slug 聚合；一个考点得满分，两个及以上考点取权重最高的两个；
 - 权重缺失或全为 0 时平均分配；
 - 结果按年份和组别筛选。
 

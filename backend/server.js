@@ -1,9 +1,10 @@
 const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
-const { migrate } = require('./db');
+const { db, migrate } = require('./db');
 const { authOptional } = require('./auth');
 const { setSecurityHeaders, staticOptions } = require('./security');
+const { initializeTagSystem } = require('./tag-service');
 
 const authRoutes = require('./routes/auth');
 const problemRoutes = require('./routes/problems');
@@ -13,8 +14,10 @@ const judgeRoutes = require('./routes/judge');
 const prelimRoutes = require('./routes/prelim');
 const analyticsRoutes = require('./routes/analytics');
 const profileRoutes = require('./routes/profile');
+const tagRoutes = require('./routes/tags');
 
 migrate();
+initializeTagSystem(db);
 
 const app = express();
 app.disable('x-powered-by');
@@ -32,6 +35,7 @@ app.use('/api/submissions', submissionRoutes);
 app.use('/api/prelim', prelimRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/profile', profileRoutes);
+app.use('/api/tags', tagRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/judge', express.json({ limit: '20mb' }), judgeRoutes);
 

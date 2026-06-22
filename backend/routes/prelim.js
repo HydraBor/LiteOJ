@@ -13,6 +13,7 @@ const {
   questionFromRow,
   tagNamesFromJson,
 } = require('../prelim-utils');
+const { normalizeTagList, resolveTagQuery, syncPrelimQuestionTags } = require('../tag-service');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Number(process.env.PRELIM_MD_LIMIT || 2) * 1024 * 1024 } });
@@ -62,7 +63,17 @@ function selectGroups(req, adminMode = false) {
   if (req.query.year) { where.push('p.year = ?'); params.push(Number(req.query.year)); }
   if (req.query.groupName) { where.push('p.group_name = ?'); params.push(normalizeGroupName(req.query.groupName)); }
   if (req.query.section) { where.push('g.section = ?'); params.push(String(req.query.section)); }
-  if (req.query.tag) { where.push('g.tags_json LIKE ?'); params.push(`%"${String(req.query.tag).replace(/"/g, '')}"%`); }
+  if (req.query.tag) {
+    const tagSlug = resolveTagQuery(db, req.query.tag);
+    if (tagSlug) {
+      where.push(`EXISTS (
+        SELECT 1 FROM prelim_questions tq
+        JOIN oj_prelim_question_tags tqt ON tqt.question_id = tq.id
+        WHERE tq.group_id = g.id AND tqt.tag_slug = ?
+      )`);
+      params.push(tagSlug);
+    }
+  }
   if (req.query.keyword) {
     const kw = `%${String(req.query.keyword).trim()}%`;
     where.push(`(g.title LIKE ? OR g.stem LIKE ? OR g.code LIKE ? OR EXISTS (SELECT 1 FROM prelim_questions kq WHERE kq.group_id = g.id AND (kq.stem LIKE ? OR kq.explanation LIKE ?)))`);
@@ -158,6 +169,7 @@ function importParsedPaper(parsed, options = {}) {
       (group_id, paper_id, number, question_type, stem, score, options_json, answer, explanation, tags_json, sort_order, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`);
     for (const g of parsed.groups) {
+      const groupTags = normalizeTagList(g.tags || []);
       const gInfo = insertGroup.run(
         paperId,
         g.number,
@@ -167,13 +179,14 @@ function importParsedPaper(parsed, options = {}) {
         g.sectionTitle || '',
         g.stem || '',
         g.code || '',
-        JSON.stringify(g.tags || []),
+        JSON.stringify(groupTags),
         1,
         g.sortOrder || g.firstQuestionNumber || g.number,
       );
       const groupId = gInfo.lastInsertRowid;
       for (const q of g.questions || []) {
-        insertQuestion.run(
+        const normalizedTags = normalizeTagList(q.tags || []);
+        const qInfo = insertQuestion.run(
           groupId,
           paperId,
           q.number,
@@ -183,9 +196,10 @@ function importParsedPaper(parsed, options = {}) {
           JSON.stringify(q.options || []),
           q.answer || '',
           q.explanation || '',
-          JSON.stringify(q.tags || []),
+          JSON.stringify(normalizedTags),
           q.sortOrder || q.number,
         );
+        syncPrelimQuestionTags(db, qInfo.lastInsertRowid, normalizedTags, 'imported');
       }
     }
     return paperId;
@@ -228,11 +242,20 @@ router.get('/facets', (req, res) => {
     sections.add(row.section);
     for (const tag of tagNamesFromJson(parseJson(row.tags_json, []))) tags.add(tag);
   }
+  const tagRows = db.prepare(`SELECT DISTINCT t.slug, t.name_zh
+    FROM prelim_groups g
+    JOIN prelim_questions q ON q.group_id = g.id
+    JOIN oj_prelim_question_tags qt ON qt.question_id = q.id
+    JOIN oj_tags t ON t.slug = qt.tag_slug
+    ${visibilitySql}
+    ORDER BY t.sort_order ASC, t.name_zh ASC`).all();
   res.json({
     years: [...years].sort((a, b) => b - a),
     groups: [...groups].sort(),
     sections: [...sections].sort(),
-    tags: [...tags].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')),
+    tags: tagRows.length
+      ? tagRows.map((tag) => ({ value: tag.slug, label: tag.name_zh, slug: tag.slug, name: tag.name_zh }))
+      : [...tags].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')),
     sectionLabels: SECTION_LABELS,
   });
 });

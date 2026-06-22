@@ -64,6 +64,9 @@ async function main() {
   await request('POST', '/api/auth/login', { username: 'Algor', password: 'Wuchuanmin_2003' });
   const me = await request('GET', '/api/auth/me');
   assert.strictEqual(me.user.role, 'admin', 'admin login should work');
+  const tagList = await request('GET', '/api/tags?scope=programming');
+  assert(tagList.tags.some((tag) => tag.slug === 'simulation' && tag.nameZh === '模拟'), 'tag API should expose canonical programming tags');
+  assert(tagList.tags.some((tag) => tag.slug === 'dynamic-programming'), 'tag API should expose dynamic programming');
 
   const problemId = `T${Date.now()}`;
   const cloneId = `C${Date.now()}`;
@@ -71,33 +74,35 @@ async function main() {
     id: problemId,
     title: '烟测新增题',
     description: '# 题面\n\n输入两个整数，输出它们的和。',
-	    difficulty: 'beginner',
-	    timeLimit: 1000,
-	    memoryLimit: 128,
-	    checkerMode: 'standard',
-	    tags: ['烟测', '加法'],
-	  });
-	  assert.strictEqual(created.problem.id, problemId, 'problem create should preserve string id');
-	  assert.strictEqual(created.problem.checkerMode, 'standard', 'problem create should save checker mode');
-	  assert.strictEqual(created.problem.isPublic, false, 'problem create should default to hidden');
+    difficulty: 'beginner',
+    timeLimit: 1000,
+    memoryLimit: 128,
+    checkerMode: 'standard',
+    tags: ['simulation', 'mathematics'],
+  });
+  assert.strictEqual(created.problem.id, problemId, 'problem create should preserve string id');
+  assert.strictEqual(created.problem.checkerMode, 'standard', 'problem create should save checker mode');
+  assert.strictEqual(created.problem.isPublic, false, 'problem create should default to hidden');
+  assert.deepStrictEqual(created.problem.tags.map((tag) => tag.slug), ['simulation', 'mathematics'], 'problem tags should be saved as fixed slugs');
 
   const updated = await request('PUT', `/api/problems/${encodeURIComponent(problemId)}`, {
     id: problemId,
     title: '烟测编辑题',
     description: '# 修改后的题面\n\n用于测试编辑保存。',
     difficulty: 'popular_minus',
-	    timeLimit: 1200,
-	    memoryLimit: 256,
-	    checkerMode: 'special_judge',
-	    tags: ['烟测', '编辑'],
-	    isPublic: true,
-	  });
-	  assert.strictEqual(updated.problem.title, '烟测编辑题', 'problem edit should update title');
-	  assert.strictEqual(updated.problem.checkerMode, 'special_judge', 'problem edit should update checker mode');
+    timeLimit: 1200,
+    memoryLimit: 256,
+    checkerMode: 'special_judge',
+    tags: ['dynamic-programming', 'array-basic'],
+    isPublic: true,
+  });
+  assert.strictEqual(updated.problem.title, '烟测编辑题', 'problem edit should update title');
+  assert.strictEqual(updated.problem.checkerMode, 'special_judge', 'problem edit should update checker mode');
+  assert(updated.problem.tags.some((tag) => tag.slug === 'array-basic' && tag.name === '数组'), 'problem edit should keep fixed tag display names');
 
-	  const checkerSource = '#include "testlib.h"\nint main(int argc, char* argv[]) { registerTestlibCmd(argc, argv); long long x = ouf.readLong(); long long y = ans.readLong(); if (x != y) quitf(_wa, "expected %lld found %lld", y, x); quitf(_ok, "ok"); }\n';
-	  const checkerFd = new FormData();
-	  checkerFd.set('checker', new Blob([checkerSource], { type: 'text/x-c++src' }), 'checker.cpp');
+  const checkerSource = '#include "testlib.h"\nint main(int argc, char* argv[]) { registerTestlibCmd(argc, argv); long long x = ouf.readLong(); long long y = ans.readLong(); if (x != y) quitf(_wa, "expected %lld found %lld", y, x); quitf(_ok, "ok"); }\n';
+  const checkerFd = new FormData();
+  checkerFd.set('checker', new Blob([checkerSource], { type: 'text/x-c++src' }), 'checker.cpp');
 	  const checker = await request('POST', `/api/problems/${encodeURIComponent(problemId)}/checker`, checkerFd);
 	  assert.strictEqual(checker.hasChecker, true, 'checker upload should save checker.cpp');
 
@@ -150,6 +155,9 @@ async function main() {
   for (const year of [2019, 2020, 2021, 2022, 2023, 2024, 2025]) {
     assert(prelimFacets.years.includes(year), `prelim facets should include seeded ${year} paper`);
   }
+  assert((prelimFacets.tags || []).some((tag) => tag.value === 'language-basics' || tag.slug === 'language-basics'), 'prelim facets should expose fixed tag slugs');
+  const analytics = await request('GET', '/api/analytics/prelim/knowledge?years=2025&groupName=CSP-J');
+  assert((analytics.items || []).some((item) => item.slug && item.tag), 'analytics should return slug-based tag items with display names');
   const prelimItems = await request('GET', '/api/prelim/items');
   assert(prelimItems.items.length > 0, 'prelim item list should work');
   const mockPapers = await request('GET', '/api/prelim/mock/papers');

@@ -4,6 +4,8 @@ const SECTION_LABELS = {
   code_completion: '完善程序',
 };
 
+const { normalizeTagInput, normalizeTagList, tagNamesFromList } = require('./tag-service');
+
 function normalizeGroupName(value) {
   const raw = String(value || '').trim().toUpperCase();
   if (/CSP[-_ ]?S|\bS\b/.test(raw)) return 'CSP-S';
@@ -59,30 +61,62 @@ function compactPaperLines(lines) {
   return (lines || []).filter((line) => !isIgnorablePaperLine(line));
 }
 
+function parseTagWeights(payload, questionNumber) {
+  const parts = String(payload || '').split(/[，,；;]/).map((x) => x.trim()).filter(Boolean);
+  if (!parts.length) {
+    const err = new Error(`第 ${questionNumber} 题缺少考点权重`);
+    err.status = 400;
+    throw err;
+  }
+  const bySlug = new Map();
+  for (const part of parts) {
+    const match = part.match(/^([a-z][a-z0-9-]*)\s*:\s*(\d+(?:\.\d+)?)\s*%?$/);
+    if (!match) {
+      const err = new Error(`第 ${questionNumber} 题考点格式错误：${part}；请使用 slug: 80%`);
+      err.status = 400;
+      throw err;
+    }
+    const slug = match[1];
+    const weight = Number(match[2]);
+    const tag = normalizeTagInput({ slug, weight });
+    if (!tag) {
+      const err = new Error(`第 ${questionNumber} 题使用了未登记的标签 slug：${slug}`);
+      err.status = 400;
+      throw err;
+    }
+    const current = bySlug.get(tag.slug) || { ...tag, weight: 0 };
+    current.weight += weight;
+    bySlug.set(tag.slug, current);
+  }
+  return normalizeTagList([...bySlug.values()], { throwOnUnknown: true });
+}
+
+function parseExplanation(body) {
+  const match = String(body || '').match(/\*\*详细解析[:：]\*\*\s*([\s\S]*?)(?=\n\s*\*\*考点与权重[:：]\*\*|$)/i);
+  if (!match) return '';
+  const lines = match[1].trim().split('\n');
+  while (lines.length && /^-{3,}$/.test(lines[0].trim())) lines.shift();
+  while (lines.length && /^-{3,}$/.test(lines[lines.length - 1].trim())) lines.pop();
+  return lines.join('\n').trim();
+}
+
 function parseAnswerAndExplanations(solutionMd) {
   const text = String(solutionMd || '').replace(/\r\n/g, '\n');
   const result = new Map();
-  const re = /^###\s+(\d+)\.\s*答案[:：]\s*([^\n]+)\n([\s\S]*?)(?=^###\s+\d+\.\s*答案[:：]|^##\s+|$(?![\s\S]))/gm;
+  const re = /^#{2,3}\s+(\d+)\.\s*答案[:：]\s*([^\n]+)\n([\s\S]*?)(?=^#{2,3}\s+\d+\.\s*答案[:：]|^#\s+|$(?![\s\S]))/gm;
   let m;
   while ((m = re.exec(text)) !== null) {
     const number = Number(m[1]);
     const answer = answerToStored(m[2]);
     const body = m[3] || '';
-    let explanation = '';
-    const detailMatch = body.match(/\*\*详细解析[:：]\*\*\s*([\s\S]*?)(?=\n\s*\*\*考点\s*tag\s*与权重[:：]\*\*|$)/i);
-    if (detailMatch) explanation = detailMatch[1].trim();
-    const tags = [];
-    const tagMatch = body.match(/\*\*考点\s*tag\s*与权重[:：]\*\*\s*([^\n]+)/i);
-    if (tagMatch) {
-      for (const part of tagMatch[1].split(/[；;]/)) {
-        const t = part.trim();
-        if (!t) continue;
-        const tm = t.match(/^(.+?)\s*(\d+(?:\.\d+)?)%?$/);
-        if (tm) tags.push({ name: tm[1].trim(), weight: Number(tm[2]) });
-        else tags.push({ name: t, weight: 0 });
-      }
+    const explanation = parseExplanation(body);
+    const tagMatch = body.match(/\*\*考点与权重[:：]\*\*\s*([^\n]+)/i);
+    if (!tagMatch) {
+      const err = new Error(`第 ${number} 题缺少“考点与权重”行`);
+      err.status = 400;
+      throw err;
     }
-    result.set(number, { answer, explanation, tags });
+    result.set(number, { answer, explanation, tags: parseTagWeights(tagMatch[1], number) });
   }
   return result;
 }
@@ -116,13 +150,15 @@ function mergeTags(questions) {
   const map = new Map();
   for (const q of questions) {
     for (const tag of q.tags || []) {
-      const name = typeof tag === 'string' ? tag : tag?.name;
-      if (!name) continue;
+      const normalized = normalizeTagInput(tag);
+      if (!normalized?.slug) continue;
       const weight = typeof tag === 'string' ? 0 : Number(tag.weight) || 0;
-      map.set(name, (map.get(name) || 0) + weight);
+      const current = map.get(normalized.slug) || { ...normalized, weight: 0 };
+      current.weight += weight;
+      map.set(normalized.slug, current);
     }
   }
-  return [...map.entries()].map(([name, weight]) => ({ name, weight: Math.round(weight / Math.max(questions.length, 1)) }));
+  return [...map.values()].map((tag) => ({ ...tag, weight: Math.round(tag.weight / Math.max(questions.length, 1)) }));
 }
 
 function cleanGroupStem(lines) {
@@ -268,7 +304,7 @@ function parsePaperQuestions(paperMd, solutionMd, meta = {}) {
 
 function tagNamesFromJson(tags) {
   const arr = Array.isArray(tags) ? tags : [];
-  return arr.map((t) => typeof t === 'string' ? t : t?.name).filter(Boolean);
+  return tagNamesFromList(arr);
 }
 
 function questionFromRow(row) {

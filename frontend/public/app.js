@@ -275,9 +275,24 @@ function prelimStatusBadge(q) {
   if (q.userResult === 0 || q.userResult === false) return '<span class="state-pill state-hidden">错误</span>';
   return '<span class="state-pill state-none">未做</span>';
 }
+function tagLabel(tag) {
+  if (tag === null || tag === undefined || tag === '') return '';
+  if (typeof tag === 'string') return tag;
+  if (typeof tag !== 'object') return String(tag);
+  return tag.nameZh || tag.name || tag.label || tag.slug || '';
+}
+function tagValue(tag) {
+  if (tag === null || tag === undefined || tag === '') return '';
+  if (typeof tag === 'string') return tag;
+  if (typeof tag !== 'object') return String(tag);
+  return tag.value || tag.slug || tag.nameZh || tag.name || tag.label || '';
+}
+function tagChips(tags = [], className = 'tag-chip') {
+  const list = (tags || []).map(tagLabel).filter(Boolean);
+  return list.length ? list.map((name) => `<span class="${esc(className)}">${esc(name)}</span>`).join('') : '<span class="muted">--</span>';
+}
 function prelimTags(q) {
-  const names = q.tagNames || (q.tags || []).map((t) => typeof t === 'string' ? t : t.name).filter(Boolean);
-  return names.length ? names.map((t) => `<span class="tag-chip">${esc(t)}</span>`).join('') : '<span class="muted">--</span>';
+  return tagChips(q.tagNames || q.tags || []);
 }
 function prelimQuestionRow(q) {
   return `<tr>
@@ -294,7 +309,7 @@ function prelimOptionButton(option) {
 }
 function prelimTagWeights(tags = []) {
   if (!tags.length) return '<span class="muted">暂无知识点</span>';
-  return tags.map((t) => `<span class="tag-chip">${esc(t.name || t)}${t.weight ? ` ${esc(t.weight)}%` : ''}</span>`).join('');
+  return tags.map((t) => `<span class="tag-chip">${esc(tagLabel(t))}${t.weight ? ` ${esc(t.weight)}%` : ''}</span>`).join('');
 }
 function formatScore(value) {
   const n = Number(value || 0);
@@ -362,7 +377,11 @@ function renderReportQuestionOptions(q, answer = {}) {
 
 function sortText(s) { return ({ default: '默认排序', recent: '最新创建', title: '标题排序', difficulty: '难度排序', acceptance: '通过率' }[s] || '默认排序'); }
 function optionList(items = [], selected = '', label = '全部') {
-  return `<option value="">${label}</option>` + items.map((x) => `<option value="${esc(x)}" ${String(selected) === String(x) ? 'selected' : ''}>${esc(x)}</option>`).join('');
+  return `<option value="">${label}</option>` + items.map((x) => {
+    const value = tagValue(x);
+    const text = tagLabel(x);
+    return `<option value="${esc(value)}" ${String(selected) === String(value) ? 'selected' : ''}>${esc(text)}</option>`;
+  }).join('');
 }
 function acceptanceText(p) {
   if (!p.submitCount) return '--';
@@ -608,7 +627,7 @@ function publicProblemRow(p) {
   return `<tr>
     <td>${problemSubmitStatus(p)}</td>
     <td>${routeAnchor(`/problem/${problemUrl(p.id)}`, `${p.id}. ${p.title}`, 'problem-title-link')}</td>
-    <td>${(p.tags || []).length ? (p.tags || []).map((t) => `<span class="tag-chip">${esc(t)}</span>`).join('') : '<span class="muted">--</span>'}</td>
+    <td>${tagChips(p.tags || [])}</td>
     <td>${difficultyBadge(p.difficulty)}</td>
     <td>${acceptanceText(p)}</td>
   </tr>`;
@@ -619,7 +638,7 @@ function manageProblemRow(p) {
     <td><input type="checkbox" class="problem-check" value="${esc(p.id)}"></td>
     <td>${problemVisibilityBadge(p)}<div class="muted small">数据 ${p.caseCount || 0} 组</div></td>
     <td>${routeAnchor(`/problem/${problemUrl(p.id)}`, `${p.id}. ${p.title}`, 'problem-title-link')}</td>
-    <td>${(p.tags || []).length ? (p.tags || []).map((t) => `<span class="tag-chip">${esc(t)}</span>`).join('') : '<span class="muted">--</span>'}</td>
+    <td>${tagChips(p.tags || [])}</td>
     <td>${difficultyBadge(p.difficulty)}</td>
     <td>${acceptanceText(p)}<div class="muted small">${p.acCount || 0}/${p.submitCount || 0}</div></td>
     <td class="table-actions-cell">
@@ -682,7 +701,7 @@ async function renderProblem(id) {
         </div>
         ${currentUser?.role === 'admin' ? `<div class="row actions">${routeLink(`/admin/problem/${problemUrl(p.id)}/edit`, '编辑', 'btn')}</div>` : ''}
       </div>
-      <div class="problem-tags">${(p.tags || []).map((t) => `<span class="problem-tag">${esc(t)}</span>`).join('')}${p.isPublic ? '' : '<span class="problem-tag warn">隐藏</span>'}</div>
+      <div class="problem-tags">${(p.tags || []).map((t) => `<span class="problem-tag">${esc(tagLabel(t))}</span>`).join('')}${p.isPublic ? '' : '<span class="problem-tag warn">隐藏</span>'}</div>
       <div class="markdown problem-statement">${renderMarkdown(p.description || '暂无题面')}</div>
     </div>
     <div class="card">
@@ -2057,13 +2076,37 @@ function mdEditor(name, label, value = '', options = {}) {
   </div>`;
 }
 
+function selectedTagValues(tags = []) {
+  return new Set((tags || []).map((tag) => tag?.slug || tag?.value || (typeof tag === 'string' ? tag : '')).filter(Boolean));
+}
+function renderProblemTagSelector(allTags = [], selectedTags = []) {
+  const selected = selectedTagValues(selectedTags);
+  const options = (allTags || [])
+    .filter((tag) => tag.scope !== 'prelim' && tag.level !== 'domain')
+    .map((tag) => {
+      const value = tag.slug || tag.value;
+      const label = tag.nameZh || tag.name || tag.label || value;
+      const meta = [tag.parentSlug, tag.level].filter(Boolean).join(' / ');
+      return `<option value="${esc(value)}" ${selected.has(value) ? 'selected' : ''}>${esc(label)}${value ? ` / ${esc(value)}` : ''}${meta ? ` · ${esc(meta)}` : ''}</option>`;
+    }).join('');
+  return `<div class="form-block tag-picker-block">
+    <label>标签</label>
+    <select name="tags" multiple size="10" class="tag-multi-select">${options}</select>
+    <p class="muted small">按住 Ctrl 或 Command 可多选。系统保存 slug，页面统一展示对应的中文名称。</p>
+  </div>`;
+}
+
 function collectProblemForm(form, existingId) {
   const f = formData(form);
+  const tagSelect = form.querySelector('select[name="tags"]');
+  const tags = tagSelect
+    ? Array.from(tagSelect.selectedOptions).map((option) => option.value).filter(Boolean)
+    : String(f.tags || '').split(',').map((x) => x.trim()).filter(Boolean);
   return {
     id: f.id || existingId || '',
     title: f.title,
     description: f.description,
-    tags: String(f.tags || '').split(',').map((x) => x.trim()).filter(Boolean),
+    tags,
     difficulty: f.difficulty || 'unrated',
     timeLimit: Number(f.timeLimit) || 1000,
     memoryLimit: Number(f.memoryLimit) || 128,
@@ -2099,10 +2142,12 @@ async function renderProblemEditor(id) {
   if (currentUser?.role !== 'admin') return renderLogin();
   const isNew = id === 'new';
   let p = { id: '', title: '', description: '', tags: [], difficulty: 'beginner', timeLimit: 1000, memoryLimit: 128, checkerMode: 'standard', checkerTolerance: 0.000001, isPublic: false, hasChecker: false };
+  const tagDataPromise = api('/api/tags?scope=programming');
   if (!isNew) p = (await api(problemApi(id))).problem;
   if (isNew) {
     try { p.id = (await api('/api/problems/next-id')).id; } catch (_) { p.id = ''; }
   }
+  const tagData = await tagDataPromise;
   app.innerHTML = `
     <div class="editor-layout-page rich-editor-page">
       <div class="edit-title-wrap">
@@ -2126,7 +2171,7 @@ async function renderProblemEditor(id) {
             <p class="muted small">用于答案不唯一的题目。checker.cpp 使用 testlib 风格编写，在测试数据管理页上传；参数顺序为 input、用户输出、标准输出。</p>
             ${!isNew ? `<span class="state-pill ${p.checkerMode === 'special_judge' && p.hasChecker ? 'state-public' : 'state-none'}">${p.checkerMode === 'special_judge' ? (p.hasChecker ? '已上传 checker.cpp' : '待上传 checker.cpp') : '标准输出评测'}</span>` : ''}
           </div>
-          <label>标签，逗号分隔</label><input name="tags" value="${esc((p.tags || []).join(','))}" placeholder="例如 图论,LCA,树形DP" />
+          ${renderProblemTagSelector(tagData.tags || [], p.tags || [])}
           ${mdEditor('description', '题面', p.description, { required: true, maxLength: 50000 })}
           <div class="form-block publish-form-block">
             <label class="checkbox-line publish-line"><input type="checkbox" name="isPublic" ${p.isPublic ? 'checked' : ''} /> 公开题目</label>

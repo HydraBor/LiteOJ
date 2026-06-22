@@ -7,6 +7,7 @@ const {
   sortProblems,
 } = require('../backend/problem-utils');
 const { parsePaperQuestions, normalizeGroupName } = require('../backend/prelim-utils');
+const { normalizeTagInput } = require('../backend/tag-service');
 const { compareOutput } = require('../judge/checker');
 const { applyScoring } = require('../judge/runner');
 
@@ -81,7 +82,10 @@ assert.strictEqual(parsedPrelim.groups.length, 20, '2025 CSP-J1 seed should pars
 assert.strictEqual(parsedPrelim.paper.totalScore, 100, 'mock exam total should follow official paper total, not rounded raw question sum');
 assert.strictEqual(parsedPrelim.questions.reduce((sum, q) => sum + q.score, 0), 100, 'seed raw score should match the official 100-point paper after score correction');
 assert.strictEqual(parsedPrelim.questions.find((q) => q.number === 16).score, 1, 'question 16 should be corrected to 1 point');
-assert.deepStrictEqual(parsedPrelim.questions.find((q) => q.number === 1).tags.map((t) => t.name), ['位字节', '数据类型'], 'question 1 tag wording should be 位字节 + 数据类型');
+assert.deepStrictEqual(parsedPrelim.questions.find((q) => q.number === 1).tags.map((t) => t.slug), ['base-conversion', 'language-basics'], 'question 1 tags should use fixed slug-only tags');
+assert.deepStrictEqual(parsedPrelim.questions.find((q) => q.number === 1).tags.map((t) => t.name), ['进制', '语言入门'], 'question 1 tags should display the fixed Chinese names');
+assert(!parsedPrelim.questions.some((q) => /^---$/m.test(q.explanation || '')), 'preliminary explanations should not keep Markdown horizontal-rule separators');
+assert.strictEqual(normalizeTagInput('语言入门'), null, 'Chinese tag names should not resolve in the slug-only tag system');
 assert.strictEqual(parsedPrelim.questions.find((q) => q.number === 1).answer, 'A');
 assert.strictEqual(parsedPrelim.questions.find((q) => q.number === 16).questionType, 'true_false');
 assert.strictEqual(parsedPrelim.questions.find((q) => q.number === 16).answer, 'T');
@@ -159,6 +163,7 @@ assert(!appJs.includes('<h1>初赛题库</h1>'), 'prelim list should not show re
 assert(!appJs.includes('<label>作答'), 'prelim filter should not show retired answer/question-type filter');
 assert(!appJs.includes("const keys = ['keyword','year','groupName','section','questionType'") && !appJs.includes('name="questionType"'), 'prelim filter should not send retired questionType query');
 assert(appJs.includes('prelim-filter-card'), 'prelim list should start with a clean filter card');
+assert(appJs.includes("typeof tag !== 'object'") && appJs.includes('return String(tag);'), 'filter option rendering should support numeric year facets');
 assert(!appJs.includes('第 ${q.number} 题${questionScoreInline(q)}') && !appJs.includes('第 ${item.firstQuestionNumber || item.number} 题${questionScoreInline(item)}'), 'prelim list titles should not duplicate the score after the question number');
 assert(appJs.includes('class="prelim-type-cell"') && appJs.includes('class="prelim-type-chip"'), 'prelim list should use non-wrapping type chips');
 assert(!appJs.includes('esc(item.paperTitle'), 'prelim list and item header should not repeat the paper title under each item');
@@ -243,10 +248,10 @@ assert(deployDockerScript.includes('mirrors.tuna.tsinghua.edu.cn/docker-ce') && 
 const seedProblemJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'seed', 'problems', 'P1001', 'problem.json'), 'utf8'));
 assert(!seedProblemJson.description.includes('数学公式示例') && !seedProblemJson.description.includes('a^2+b^2'), 'seed A+B problem should not include unrelated math formula examples');
 assert(seedProblemJson.description.includes('$a$') && seedProblemJson.description.includes('$b$') && seedProblemJson.description.includes('$a+b$'), 'seed A+B problem should keep formulas related to the statement itself');
-assert.deepStrictEqual(seedProblemJson.tags, ['模拟'], 'seed A+B problem should only keep the 模拟 tag');
+assert.deepStrictEqual(seedProblemJson.tags, ['simulation'], 'seed A+B problem should only keep the simulation slug');
 const initJs = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'init.js'), 'utf8');
 const resetAdminJs = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'reset-admin.js'), 'utf8');
-assert(initJs.includes('shouldRefreshSample') && initJs.includes('数学公式示例') && initJs.includes("raw.id === 'P1001'") && initJs.includes("JSON.stringify(['模拟'])"), 'init should refresh stored P1001 statement/tags when rerun');
+assert(initJs.includes('shouldRefreshSample') && initJs.includes('数学公式示例') && initJs.includes("raw.id === 'P1001'") && initJs.includes("existingTags === '[]'"), 'init should refresh stored P1001 statement/tags when rerun');
 assert(initJs.includes("DEFAULT_ADMIN_USERNAME = 'Algor'") && initJs.includes("DEFAULT_ADMIN_PASSWORD = 'Wuchuanmin_2003'"), 'init should use the configured default admin credentials');
 assert(initJs.includes('hashPassword(password)') && !initJs.includes('bcrypt.hashSync'), 'init should use centralized bcrypt password helpers');
 assert(initJs.includes('Admin seed skipped; existing admin user') && initJs.includes("UPDATE users SET role = 'admin'"), 'init should not reset existing admin passwords and should recover databases without an admin');

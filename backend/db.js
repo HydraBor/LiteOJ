@@ -167,6 +167,52 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_prelim_attempts_user ON prelim_attempts(user_id);
     CREATE INDEX IF NOT EXISTS idx_prelim_mock_user ON prelim_mock_exams(user_id);
     CREATE INDEX IF NOT EXISTS idx_prelim_mock_paper ON prelim_mock_exams(source_paper_id);
+
+    CREATE TABLE IF NOT EXISTS oj_tags (
+      slug TEXT PRIMARY KEY,
+      name_zh TEXT NOT NULL,
+      name_en TEXT NOT NULL DEFAULT '',
+      parent_slug TEXT NOT NULL DEFAULT '',
+      level TEXT NOT NULL DEFAULT 'topic',
+      node_type TEXT NOT NULL DEFAULT 'knowledge',
+      scope TEXT NOT NULL DEFAULT 'all',
+      description TEXT NOT NULL DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_visible INTEGER NOT NULL DEFAULT 1,
+      is_deprecated INTEGER NOT NULL DEFAULT 0,
+      merged_to_slug TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS oj_problem_tags (
+      problem_id TEXT NOT NULL,
+      tag_slug TEXT NOT NULL,
+      weight REAL NOT NULL DEFAULT 10,
+      is_primary INTEGER NOT NULL DEFAULT 0,
+      source TEXT NOT NULL DEFAULT 'manual',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY(problem_id, tag_slug),
+      FOREIGN KEY(problem_id) REFERENCES problems(id) ON DELETE CASCADE,
+      FOREIGN KEY(tag_slug) REFERENCES oj_tags(slug) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS oj_prelim_question_tags (
+      question_id INTEGER NOT NULL,
+      tag_slug TEXT NOT NULL,
+      weight REAL NOT NULL DEFAULT 0,
+      is_primary INTEGER NOT NULL DEFAULT 0,
+      source TEXT NOT NULL DEFAULT 'imported',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY(question_id, tag_slug),
+      FOREIGN KEY(question_id) REFERENCES prelim_questions(id) ON DELETE CASCADE,
+      FOREIGN KEY(tag_slug) REFERENCES oj_tags(slug) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_oj_tags_parent ON oj_tags(parent_slug);
+    CREATE INDEX IF NOT EXISTS idx_oj_tags_scope ON oj_tags(scope, is_visible, sort_order);
+    CREATE INDEX IF NOT EXISTS idx_oj_problem_tags_tag ON oj_problem_tags(tag_slug);
+    CREATE INDEX IF NOT EXISTS idx_oj_prelim_question_tags_tag ON oj_prelim_question_tags(tag_slug);
   `);
 
   function tableColumns(table) {

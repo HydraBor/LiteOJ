@@ -4,8 +4,10 @@ const { db, migrate, DATA_DIR } = require('../backend/db');
 const { hashPassword } = require('../backend/passwords');
 const { parsePaperQuestions } = require('../backend/prelim-utils');
 const { importParsedPaper } = require('../backend/routes/prelim');
+const { initializeTagSystem, normalizeTagList, syncProblemTags, syncPrelimQuestionTags } = require('../backend/tag-service');
 
 migrate();
+initializeTagSystem(db);
 
 const DEFAULT_ADMIN_USERNAME = 'Algor';
 const DEFAULT_ADMIN_PASSWORD = 'Wuchuanmin_2003';
@@ -37,6 +39,40 @@ function seedPrelimPapers() {
   const seedDir = path.join(__dirname, '..', 'seed', 'prelim');
   if (!fs.existsSync(seedDir)) return;
   const files = fs.readdirSync(seedDir).filter((name) => name.endsWith('.md') && !name.includes('solution') && !name.includes('答案'));
+  function refreshExistingSeedPaper(paperId, parsed) {
+    const updateGroup = db.prepare(`UPDATE prelim_groups
+      SET title = ?, section_title = ?, stem = ?, code = ?, tags_json = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE paper_id = ? AND number = ?`);
+    const updateQuestion = db.prepare(`UPDATE prelim_questions
+      SET answer = ?, explanation = ?, tags_json = ?, score = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE paper_id = ? AND number = ?`);
+    const selectQuestion = db.prepare('SELECT id FROM prelim_questions WHERE paper_id = ? AND number = ?');
+    for (const group of parsed.groups) {
+      const groupTags = normalizeTagList(group.tags || []);
+      updateGroup.run(
+        group.title || '',
+        group.sectionTitle || '',
+        group.stem || '',
+        group.code || '',
+        JSON.stringify(groupTags),
+        paperId,
+        group.number,
+      );
+      for (const question of group.questions || []) {
+        const tags = normalizeTagList(question.tags || []);
+        updateQuestion.run(
+          question.answer || '',
+          question.explanation || '',
+          JSON.stringify(tags),
+          question.score || 0,
+          paperId,
+          question.number,
+        );
+        const row = selectQuestion.get(paperId, question.number);
+        if (row) syncPrelimQuestionTags(db, row.id, tags, 'seed');
+      }
+    }
+  }
   for (const name of files) {
     const base = name.replace(/\.md$/i, '');
     const paperPath = path.join(seedDir, name);
@@ -51,15 +87,22 @@ function seedPrelimPapers() {
     const year = metaMatch ? Number(metaMatch[1]) : 2025;
     const groupName = metaMatch ? `CSP-${metaMatch[2].toUpperCase()}` : 'CSP-J';
     const roundName = '初赛';
-    const exists = db.prepare('SELECT id FROM prelim_papers WHERE year = ? AND group_name = ? AND round_name = ?').get(year, groupName, roundName);
-    if (exists) continue;
+    const seedTitle = `${year} ${groupName} 初赛真题`;
+    const exists = db.prepare('SELECT id, title FROM prelim_papers WHERE year = ? AND group_name = ? AND round_name = ?').get(year, groupName, roundName);
     const parsed = parsePaperQuestions(fs.readFileSync(paperPath, 'utf8'), fs.readFileSync(solutionPath, 'utf8'), {
       year,
       groupName,
       roundName,
-      title: `${year} ${groupName} 初赛真题`,
+      title: seedTitle,
       totalScore: 100,
     });
+    if (exists) {
+      if (exists.title === seedTitle) {
+        refreshExistingSeedPaper(exists.id, parsed);
+        console.log(`Refreshed prelim seed paper #${exists.id}: ${parsed.paper.title}`);
+      }
+      continue;
+    }
     const paperId = importParsedPaper(parsed, { replace: false });
     console.log(`Imported prelim seed paper #${paperId}: ${parsed.paper.title} (${parsed.groups.length} items / ${parsed.questions.length} questions)`);
   }
@@ -107,18 +150,20 @@ function seedProblem(problemDir) {
   const raw = JSON.parse(fs.readFileSync(problemPath, 'utf8'));
   const exists = db.prepare('SELECT id, title, description, tags_json FROM problems WHERE id = ?').get(raw.id);
   if (!exists) {
+    const tags = normalizeTagList(raw.tags || [], { problemMode: true, throwOnUnknown: true });
     db.prepare(`INSERT INTO problems
       (id, title, description, tags_json, difficulty, time_limit, memory_limit, is_public, created_by, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)`).run(
       raw.id,
       raw.title,
       raw.description || '',
-      JSON.stringify(raw.tags || []),
+      JSON.stringify(tags),
       raw.difficulty || 'beginner',
       Number(raw.timeLimit) || 1000,
       Number(raw.memoryLimit) || 128,
       raw.isPublic === 0 ? 0 : 1,
     );
+    syncProblemTags(db, raw.id, tags, 'seed');
   } else if (raw.id === 'P1001') {
     const existingDescription = String(exists.description || '');
     const existingTags = String(exists.tags_json || '[]');
@@ -126,12 +171,14 @@ function seedProblem(problemDir) {
       existingDescription.includes('数学公式示例') ||
       existingDescription.includes('a^2+b^2') ||
       !existingDescription.includes('$a+b$') ||
-      existingTags !== JSON.stringify(['模拟']);
+      existingTags === '[]' ||
+      existingTags === JSON.stringify(['模拟']);
     if (shouldRefreshSample) {
+      const tags = syncProblemTags(db, raw.id, raw.tags || [], 'seed');
       db.prepare('UPDATE problems SET title = ?, description = ?, tags_json = ?, difficulty = ?, time_limit = ?, memory_limit = ?, is_public = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
         raw.title,
         raw.description || '',
-        JSON.stringify(raw.tags || []),
+        JSON.stringify(tags),
         raw.difficulty || 'beginner',
         Number(raw.timeLimit) || 1000,
         Number(raw.memoryLimit) || 128,

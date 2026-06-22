@@ -18,6 +18,7 @@ const {
   normalizeCheckerMode,
   normalizeCheckerTolerance,
 } = require('../problem-config');
+const { normalizeTagList, resolveTagQuery, syncProblemTags } = require('../tag-service');
 const {
   sanitizeDataFileName,
   sanitizeSubtaskName,
@@ -110,9 +111,10 @@ function validateProblemBody(body, existing = null) {
   if (!title) throw Object.assign(new Error('题目标题不能为空'), { status: 400 });
   const description = String(body.description ?? existing?.description ?? '').trim();
   if (!description) throw Object.assign(new Error('题面不能为空'), { status: 400 });
-  const tags = Array.isArray(body.tags)
-    ? body.tags.map((x) => String(x).trim()).filter(Boolean)
-    : (existing ? JSON.parse(existing.tags_json || '[]') : []);
+  const tags = normalizeTagList(
+    Array.isArray(body.tags) ? body.tags : (existing ? JSON.parse(existing.tags_json || '[]') : []),
+    { problemMode: true, throwOnUnknown: true },
+  );
   const timeLimit = Math.max(100, Number(body.timeLimit ?? existing?.time_limit ?? 1000) || 1000);
   const memoryLimit = Math.max(16, Number(body.memoryLimit ?? existing?.memory_limit ?? 128) || 128);
   const difficulty = normalizeDifficulty(body.difficulty ?? existing?.difficulty ?? 'unrated');
@@ -143,8 +145,11 @@ function selectProblemList(req, adminMode = false) {
     where.push('(p.id LIKE ? OR p.title LIKE ? OR p.description LIKE ?)');
   }
   if (req.query.tag) {
-    params.push(`%"${String(req.query.tag).trim()}"%`);
-    where.push('p.tags_json LIKE ?');
+    const tagSlug = resolveTagQuery(db, req.query.tag);
+    if (tagSlug) {
+      params.push(tagSlug);
+      where.push('EXISTS (SELECT 1 FROM oj_problem_tags pt WHERE pt.problem_id = p.id AND pt.tag_slug = ?)');
+    }
   }
   if (req.query.difficulty) {
     params.push(normalizeDifficulty(req.query.difficulty));
@@ -209,9 +214,24 @@ router.get('/facets', (req, res) => {
   const rows = includeHidden ? db.prepare('SELECT tags_json FROM problems').all() : db.prepare('SELECT tags_json FROM problems WHERE is_public = 1').all();
   const tags = new Set();
   for (const row of rows) {
-    try { for (const tag of JSON.parse(row.tags_json || '[]')) if (tag) tags.add(tag); } catch (_) {}
+    try {
+      for (const tag of JSON.parse(row.tags_json || '[]')) {
+        const name = typeof tag === 'string' ? tag : tag?.nameZh || tag?.name;
+        if (name) tags.add(name);
+      }
+    } catch (_) {}
   }
-  res.json({ tags: [...tags].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')) });
+  const tagRows = db.prepare(`SELECT DISTINCT t.slug, t.name_zh
+    FROM problems p
+    JOIN oj_problem_tags pt ON pt.problem_id = p.id
+    JOIN oj_tags t ON t.slug = pt.tag_slug
+    ${includeHidden ? '' : 'WHERE p.is_public = 1'}
+    ORDER BY t.sort_order ASC, t.name_zh ASC`).all();
+  res.json({
+    tags: tagRows.length
+      ? tagRows.map((tag) => ({ value: tag.slug, label: tag.name_zh, slug: tag.slug, name: tag.name_zh }))
+      : [...tags].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')),
+  });
 });
 
 router.post('/', requireAdmin, (req, res, next) => {
@@ -237,6 +257,7 @@ router.post('/', requireAdmin, (req, res, next) => {
       boolToInt(data.isPublic),
       req.user.id,
     );
+    syncProblemTags(db, id, data.tags, 'manual');
     ensureProblemDir(id);
     res.json({ problem: problemWithChecker(db.prepare('SELECT * FROM problems WHERE id = ?').get(id)) });
   } catch (err) {
@@ -300,6 +321,7 @@ router.put('/:id', requireAdmin, (req, res, next) => {
       boolToInt(data.isPublic),
       id,
     );
+    syncProblemTags(db, id, data.tags, 'manual');
     res.json({ problem: problemWithChecker(db.prepare('SELECT * FROM problems WHERE id = ?').get(id)) });
   } catch (err) { return sendRouteError(res, err, next); }
 });
@@ -361,6 +383,7 @@ router.post('/:id/clone', requireAdmin, (req, res, next) => {
       rebalanceAllSubtasks(toId);
     });
     tx();
+    syncProblemTags(db, toId, JSON.parse(row.tags_json || '[]'), 'manual');
     res.json({ problem: problemWithChecker(db.prepare('SELECT * FROM problems WHERE id = ?').get(toId)) });
   } catch (err) { return sendRouteError(res, err, next); }
 });

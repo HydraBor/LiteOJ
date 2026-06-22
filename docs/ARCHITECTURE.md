@@ -47,6 +47,7 @@ go-judge container
 - `backend/security.js`：安全响应头、静态资源缓存、基础限速。
 - `backend/problem-config.js`：题目配置枚举和表单值归一化。
 - `backend/problem-files.js`：题目目录、测试点、附件、checker.cpp 文件路径。
+- `backend/tag-service.js`：统一标签词典、slug 校验、标签关系表同步。
 - `backend/prelim-utils.js`：CSP 初赛 Markdown 解析和题型归一化。
 - `backend/routes/*`：按业务域拆分的 API。
 
@@ -79,6 +80,11 @@ LiteOJ 前端是无构建步骤的单页应用：
 - `problem_cases`：测试点文件、子任务名、分值、排序、单点时空限制。
 - `submissions`：提交、代码、状态、分数、用时、内存、测试点详情。
 - `prelim_*`：初赛试卷、题组、小题、作答记录、模考记录。
+- `oj_tags`：统一标签词典。`slug` 是唯一事实来源，`name_zh` 是唯一中文展示名。
+- `oj_problem_tags`：编程题与标签的关系。
+- `oj_prelim_question_tags`：初赛小题与标签的关系。
+
+`problems.tags_json` 和 `prelim_questions.tags_json` 仍保留为接口兼容缓存；查询、筛选和数据分析优先使用关系表。
 
 题目文件位于 `DATA_DIR/problems/<problemId>/`：
 
@@ -153,6 +159,7 @@ testlib 中 `registerTestlibCmd(argc, argv)` 会据此初始化 `inf`、`ouf`、
 - `/api/judge`：judge worker 内部接口。
 - `/api/prelim`：初赛题库、导入、模考。
 - `/api/analytics`：考点统计。
+- `/api/tags`：标签列表、大纲树和 slug 校验。
 
 具体接口清单见 README。
 

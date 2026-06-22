@@ -1,6 +1,7 @@
 const express = require('express');
 const { db, parseJson } = require('../db');
-const { normalizeGroupName, tagNamesFromJson } = require('../prelim-utils');
+const { normalizeGroupName } = require('../prelim-utils');
+const { normalizeTagList, tagNamesFromList } = require('../tag-service');
 
 const router = express.Router();
 
@@ -14,24 +15,19 @@ function parseYearList(value) {
 
 function normalizeTagEntries(tagsJson) {
   const raw = parseJson(tagsJson, []);
-  const tags = Array.isArray(raw)
-    ? raw.map((tag) => {
-      if (typeof tag === 'string') return { name: tag.trim(), weight: 0 };
-      return { name: String(tag?.name || '').trim(), weight: Number(tag?.weight) || 0 };
-    }).filter((tag) => tag.name)
-    : [];
-  return tags.length ? tags : [{ name: '未标注', weight: 1 }];
+  const tags = normalizeTagList(raw);
+  return tags.length ? tags : [{ slug: 'untagged', name: '未标注', nameZh: '未标注', weight: 1 }];
 }
 
 function contributionTagsForQuestion(tagsJson) {
   const tags = normalizeTagEntries(tagsJson);
-  if (tags.length === 1) return [{ name: tags[0].name, weight: 1 }];
+  if (tags.length === 1) return [{ ...tags[0], weight: Number(tags[0].weight) || 1 }];
   const topTwo = [...tags]
     .sort((a, b) => (b.weight || 0) - (a.weight || 0) || a.name.localeCompare(b.name, 'zh-Hans-CN'))
     .slice(0, 2);
   const totalWeight = topTwo.reduce((sum, tag) => sum + (Number(tag.weight) || 0), 0);
-  if (totalWeight <= 0) return topTwo.map((tag) => ({ name: tag.name, weight: 1 }));
-  return topTwo.map((tag) => ({ name: tag.name, weight: Number(tag.weight) || 0 }));
+  if (totalWeight <= 0) return topTwo.map((tag) => ({ ...tag, weight: 1 }));
+  return topTwo.map((tag) => ({ ...tag, weight: Number(tag.weight) || 0 }));
 }
 
 function addContribution(map, key, score) {
@@ -100,6 +96,7 @@ router.get('/prelim/knowledge', (req, res) => {
   const papers = new Map();
   const questionDetails = [];
   let totalScore = 0;
+  const tagLabels = new Map(db.prepare('SELECT slug, name_zh FROM oj_tags').all().map((row) => [row.slug, row.name_zh]));
 
   for (const row of rows) {
     const score = Number(row.score) || 0;
@@ -108,8 +105,8 @@ router.get('/prelim/knowledge', (req, res) => {
     papers.set(row.paper_id, { id: row.paper_id, year: row.year, groupName: row.group_name, title: row.paper_title });
 
     const allTags = normalizeTagEntries(row.tags_json);
-    const uniqueNames = [...new Set(allTags.map((tag) => tag.name).filter(Boolean))];
-    for (const name of uniqueNames.length ? uniqueNames : ['未标注']) addCount(tagCounts, name, 1);
+    const uniqueTags = new Map(allTags.map((tag) => [tag.slug || tag.name, tag]));
+    for (const tag of (uniqueTags.size ? uniqueTags.values() : [{ slug: 'untagged', name: '未标注' }])) addCount(tagCounts, tag.slug || tag.name, 1);
 
     const contributionTags = contributionTagsForQuestion(row.tags_json);
     const rawWeightSum = contributionTags.reduce((sum, tag) => sum + (Number(tag.weight) || 0), 0);
@@ -117,11 +114,12 @@ router.get('/prelim/knowledge', (req, res) => {
     const contributions = contributionTags.map((tag) => {
       const ratio = rawWeightSum > 0 ? ((Number(tag.weight) || 0) / weightSum) : (1 / contributionTags.length);
       const contribution = score * ratio;
-      addContribution(tagScores, tag.name, contribution);
-      const yearMap = tagYearScores.get(tag.name) || new Map();
+      const key = tag.slug || tag.name;
+      addContribution(tagScores, key, contribution);
+      const yearMap = tagYearScores.get(key) || new Map();
       addContribution(yearMap, row.year, contribution);
-      tagYearScores.set(tag.name, yearMap);
-      return { tag: tag.name, score: roundScore(contribution) };
+      tagYearScores.set(key, yearMap);
+      return { slug: key, tag: tag.name, score: roundScore(contribution) };
     });
 
     questionDetails.push({
@@ -130,7 +128,7 @@ router.get('/prelim/knowledge', (req, res) => {
       groupName: row.group_name,
       number: row.number,
       score: roundScore(score),
-      tagNames: tagNamesFromJson(parseJson(row.tags_json, [])),
+      tagNames: tagNamesFromList(parseJson(row.tags_json, [])),
       contributions,
     });
   }
@@ -138,18 +136,18 @@ router.get('/prelim/knowledge', (req, res) => {
   const years = [...yearTotals.keys()].sort((a, b) => a - b);
   const total = totalScore || 1;
   const items = [...tagScores.entries()]
-    .map(([tag, score]) => ({ tag, score: roundScore(score), percent: roundPercent(score * 100 / total) }))
+    .map(([slug, score]) => ({ slug, tag: tagLabels.get(slug) || slug, score: roundScore(score), percent: roundPercent(score * 100 / total) }))
     .sort((a, b) => b.score - a.score || a.tag.localeCompare(b.tag, 'zh-Hans-CN'));
 
   const counts = [...tagCounts.entries()]
-    .map(([tag, count]) => ({ tag, count }))
+    .map(([slug, count]) => ({ slug, tag: tagLabels.get(slug) || slug, count }))
     .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'zh-Hans-CN'));
 
   const byYear = years.map((year) => {
     const yearTotal = yearTotals.get(year) || 0;
     const tags = items.map((item) => {
-      const score = tagYearScores.get(item.tag)?.get(year) || 0;
-      return { tag: item.tag, score: roundScore(score), percent: yearTotal ? roundPercent(score * 100 / yearTotal) : 0 };
+      const score = tagYearScores.get(item.slug)?.get(year) || 0;
+      return { slug: item.slug, tag: item.tag, score: roundScore(score), percent: yearTotal ? roundPercent(score * 100 / yearTotal) : 0 };
     }).filter((item) => item.score > 0);
     return { year, totalScore: roundScore(yearTotal), tags };
   });

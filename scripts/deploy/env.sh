@@ -8,8 +8,8 @@ NODE_ENV=production
 DATA_DIR=/app/data
 DATABASE_PATH=/app/data/liteoj.db
 JWT_SECRET=$(random_secret)
-ADMIN_USERNAME=Algor
-ADMIN_PASSWORD=Wuchuanmin_2003
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=admin123
 JUDGE_TOKEN=$(random_secret)
 BACKEND_URL=http://127.0.0.1:${PORT:-3000}
 JUDGE_POLL_INTERVAL_MS=2000
@@ -44,10 +44,10 @@ EOF
   ensure_plain_key NODE_ENV production
   ensure_plain_key DATA_DIR /app/data
   ensure_plain_key DATABASE_PATH /app/data/liteoj.db
-  ensure_plain_key ADMIN_USERNAME Algor
+  ensure_plain_key ADMIN_USERNAME admin
   ensure_secret_key JWT_SECRET
   if is_placeholder "$(env_value ADMIN_PASSWORD)"; then
-    set_env_key ADMIN_PASSWORD Wuchuanmin_2003
+    set_env_key ADMIN_PASSWORD admin123
   fi
   ensure_secret_key JUDGE_TOKEN
   ensure_plain_key JUDGE_POLL_INTERVAL_MS 2000
@@ -99,7 +99,7 @@ print_start_summary() {
   log "LiteOJ is running at http://127.0.0.1:${PORT:-3000}"
   log "go-judge is listening at ${GO_JUDGE_URL:-http://127.0.0.1:${GO_JUDGE_PORT:-5050}}"
   log "Judge log: $JUDGE_LOG_FILE"
-  log "Admin user: ${ADMIN_USERNAME:-Algor}"
+  log "Admin user: ${ADMIN_USERNAME:-admin}"
   if [ "$NEW_ENV_CREATED" = "1" ]; then
     log "Initial admin password: $(env_value ADMIN_PASSWORD)"
     log "The initial password is saved in .env as ADMIN_PASSWORD."

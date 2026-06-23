@@ -113,9 +113,14 @@ scripts/
 - fenced code block；
 - inline code；
 - KaTeX；
-- 图片附件。
+- 标准 Markdown 表格、表格对齐行和 `^` 向上合并；
+- `:::align{center}` 对齐块；
+- `::cute-table{tuack}` 样式化表格块；
+- 图片和下载附件。
 
 新增题目流程是先写题面，再进入测试数据管理页。
+
+前端 Markdown 渲染器在 `frontend/public/app.js` 中实现。它会修复预览里常见的拆行图片/链接语法，例如 `![a]\n(/api/...)` 会按 `![a](/api/...)` 渲染。题面附件由 `/api/problems/:id/attachments` 上传，最终文件名由 `sanitizeAttachmentFileName()` 安全化后保留原上传 basename，临时文件名才使用随机前缀。
 
 ### 测试数据
 

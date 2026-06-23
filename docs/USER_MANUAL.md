@@ -9,7 +9,7 @@
 默认管理员：
 
 ```text
-Algor / Wuchuanmin_2003
+admin / admin123
 ```
 
 登录后右上角用户名可进入个人主页修改密码。
@@ -108,8 +108,28 @@ O2：
 - Markdown；
 - KaTeX；
 - 代码块；
-- 图片附件；
+- 表格对齐和表格内 `^` 向上合并单元格；
+- `:::align{center}` / `:::align{left}` / `:::align{right}` 对齐块；
+- `::cute-table{tuack}` 表格样式块；
+- 图片和下载附件，上传后插入题面链接；
 - 实时预览。
+
+常用示例：
+
+```markdown
+:::align{center}
+居中的文字、图片或表格
+:::
+
+::cute-table{tuack}
+
+| 测试点编号 | $n \leq$ | $m \leq$ | 特殊性质 |
+| :--: | :--: | :--: | :--: |
+| $1$ | $1$ | $1$ | AB |
+| $2, 3$ | ^ | $10$ | 无 |
+```
+
+表格中的 `^` 会和上方同列单元格纵向合并。图片语法为 `![说明](附件地址)`，下载附件语法为 `[文件名](附件地址)`。附件保存时会尽量保留上传文件名；同一题目中上传同名附件会覆盖旧文件。
 
 ## 管理测试数据
 
@@ -263,14 +283,14 @@ LiteOJ 会按 `input output answer` 顺序传参。
 
 管理员进入“后台管理” -> “管理用户”。
 
-可查看用户列表，并切换普通用户和管理员角色。
+可查看用户列表、切换普通用户和管理员角色，也可以将指定用户密码重置为 `123456`。
 
 ## 常见问题
 
 ### 管理员密码忘了怎么办？
 
 ```bash
-docker compose exec app npm run reset-admin -- Algor Wuchuanmin_2003
+docker compose exec app npm run reset-admin -- admin admin123
 ```
 
 ### 上传 zip 后页面很卡怎么办？

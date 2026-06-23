@@ -56,9 +56,16 @@ function deleteCheckerSource(problemId) {
 }
 
 function sanitizeAttachmentFileName(filename) {
-  const ext = path.extname(String(filename || '')).toLowerCase();
-  const base = path.basename(String(filename || 'image'), ext).replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^_+|_+$/g, '') || 'image';
-  return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${base}${ext}`;
+  const raw = path.basename(String(filename || 'attachment').replace(/\\/g, '/')).normalize('NFC');
+  const cleaned = raw
+    .replace(/[\x00-\x1f\x7f<>:"|?*]/g, '_')
+    .replace(/\s+/g, ' ')
+    .replace(/^\.+/, '')
+    .trim();
+  const safe = cleaned || 'attachment';
+  const ext = path.extname(safe).slice(0, 32);
+  const base = path.basename(safe, ext).slice(0, 160) || 'attachment';
+  return `${base}${ext}`;
 }
 
 function copyAttachmentsAndRewriteDescription(fromId, toId, description) {

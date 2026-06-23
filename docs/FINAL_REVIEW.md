@@ -1,6 +1,6 @@
 # LiteOJ 收尾检查记录
 
-更新时间：2026-06-19
+更新时间：2026-06-23
 
 ## 检查范围
 
@@ -37,7 +37,9 @@
 - 新增题目默认隐藏。
 - 新增流程为先编辑题面，再进入测试数据管理。
 - 题目详情页右上角只显示“编辑”。
-- 题面编辑不再展示输出比较和浮点误差。
+- 题面 Markdown 支持 KaTeX、代码块、表格对齐、`^` 纵向合并、`:::align{center}` 和 `::cute-table{tuack}`。
+- 题面图片和附件通过后端接口上传，预览不会使用 base64 内嵌。
+- 附件最终文件名保留安全化后的原始 basename，下载时使用标准 `Content-Disposition`。
 - Special Judge 在题面编辑中启用，在测试数据管理页上传 `checker.cpp`。
 
 ### 测试数据
@@ -82,6 +84,7 @@
 - 宿主机 judge worker 调用 go-judge。
 - 国内镜像源、portable Node.js 和 go-judge 下载逻辑已保留。
 - SPJ 环境变量已同步到 `.env.example`、`scripts/deploy/env.sh`、`scripts/deploy/services.sh` 和 `docker-compose.yml`。
+- 部署文档补充了全量备份、恢复、清空 Docker 数据、只清空用户数据、只清空编程题库和只清空初赛题库的命令。
 
 ## 本次清理
 
@@ -90,6 +93,7 @@
 - 删除文档中输出比较、浮点误差等已不作为 UI 功能暴露的说明。
 - 重写 README、架构文档、部署文档、开发文档、使用手册和收尾检查。
 - 补全 API 清单和环境变量说明。
+- 修正题面自定义 Markdown 指令、拆行图片链接预览和附件重命名逻辑。
 
 ## 验证清单
 
@@ -105,10 +109,10 @@ git diff --check
 
 本次额外验证：
 
-- go-judge `/version` 可访问；
-- `judgeTask` 直接执行 SPJ 任务；
-- 正确输出得到 `Accepted`；
-- 错误输出得到 `Wrong Answer`。
+- `npm test` 覆盖语法检查、静态 smoke 和真实 API smoke；
+- `git diff --check` 无空白错误；
+- `docker compose config` 可正常解析；
+- 前端 Markdown 渲染函数可正确输出 `:::align{center}`、`::cute-table{tuack}`、表格 `rowspan` 和拆行图片链接。
 
 ## 已知边界
 

@@ -95,6 +95,78 @@ function safeLinkUrl(url) {
   return '#';
 }
 
+function splitMarkdownTableRow(line) {
+  let value = String(line || '').trim();
+  if (value.startsWith('|')) value = value.slice(1);
+  if (value.endsWith('|')) value = value.slice(0, -1);
+  return value.split('|').map((cell) => cell.trim());
+}
+
+function isMarkdownTableAlignRow(cells = []) {
+  return cells.length > 0 && cells.every((cell) => /^:?-{2,}:?$/.test(String(cell || '').trim()));
+}
+
+function markdownTableAlign(cell) {
+  const value = String(cell || '').trim();
+  if (value.startsWith(':') && value.endsWith(':')) return 'center';
+  if (value.endsWith(':')) return 'right';
+  if (value.startsWith(':')) return 'left';
+  return '';
+}
+
+function tableCellAttrs(cell) {
+  const attrs = [];
+  if (cell.rowspan > 1) attrs.push(`rowspan="${cell.rowspan}"`);
+  if (cell.align) attrs.push(`class="align-${esc(cell.align)}"`);
+  return attrs.length ? ` ${attrs.join(' ')}` : '';
+}
+
+function renderMarkdownTable(lines = [], options = {}) {
+  const rows = lines.map(splitMarkdownTableRow).filter((row) => row.length);
+  if (!rows.length) return '';
+  const hasAlign = rows[1] && isMarkdownTableAlignRow(rows[1]);
+  const head = rows[0] || [];
+  const body = hasAlign ? rows.slice(2) : rows.slice(1);
+  const alignments = hasAlign ? rows[1].map(markdownTableAlign) : [];
+  const colCount = Math.max(head.length, alignments.length, ...body.map((row) => row.length));
+  const pad = (row) => Array.from({ length: colCount }, (_v, index) => row[index] ?? '');
+  const headerHtml = pad(head).map((text, index) => `<th${tableCellAttrs({ align: alignments[index] || '', rowspan: 1 })}>${renderInlineMarkdown(text)}</th>`).join('');
+  const anchors = Array(colCount).fill(null);
+  const bodyRows = body.map((rawRow) => {
+    const rendered = [];
+    pad(rawRow).forEach((text, index) => {
+      if (String(text).trim() === '^' && anchors[index]) {
+        anchors[index].rowspan += 1;
+        return;
+      }
+      const cell = { text, align: alignments[index] || '', rowspan: 1 };
+      anchors[index] = cell;
+      rendered.push(cell);
+    });
+    return rendered;
+  });
+  const bodyHtml = bodyRows.map((row) => `<tr>${row.map((cell) => `<td${tableCellAttrs(cell)}>${renderInlineMarkdown(cell.text)}</td>`).join('')}</tr>`).join('');
+  const tableHtml = `<table class="md-table"><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>`;
+  const wrapperClass = String(options.wrapperClass || '').trim();
+  return wrapperClass ? `<div class="${esc(wrapperClass)}">${tableHtml}</div>` : tableHtml;
+}
+
+function normalizeBrokenMarkdownLinks(text) {
+  return String(text ?? '')
+    .replace(/!\[([^\]\n]*)\]\s*\n\s*\(([^)\n]+)\)/g, '![$1]($2)')
+    .replace(/\[([^\]\n]+)\]\s*\n\s*\(([^)\n]+)\)/g, '[$1]($2)');
+}
+
+function renderMarkdownParagraph(lines = []) {
+  const normalized = normalizeBrokenMarkdownLinks(lines.join('\n'));
+  return `<p>${normalized.split('\n').map(renderInlineMarkdown).join('<br>')}</p>`;
+}
+
+function cuteTableWrapperClass(variant = '') {
+  const key = String(variant || 'default').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'default';
+  return `md-table-wrap md-cute-table md-cute-table-${key}`;
+}
+
 function renderInlineMarkdown(text) {
   const slots = [];
   function hold(html) { slots.push(html); return `\u0000${slots.length - 1}\u0000`; }
@@ -123,9 +195,11 @@ function renderMarkdown(source) {
   let paragraph = [];
   let list = [];
   let table = [];
+  let pendingTableClass = '';
+  let alignDepth = 0;
   function flushParagraph() {
     if (!paragraph.length) return;
-    out.push(`<p>${paragraph.map(renderInlineMarkdown).join('<br>')}</p>`);
+    out.push(renderMarkdownParagraph(paragraph));
     paragraph = [];
   }
   function flushList() {
@@ -135,35 +209,64 @@ function renderMarkdown(source) {
   }
   function flushTable() {
     if (!table.length) return;
-    const rows = table.map((line) => line.replace(/^\s*\||\|\s*$/g, '').split('|').map((cell) => cell.trim()));
-    const hasAlign = rows[1] && rows[1].every((cell) => /^:?-{3,}:?$/.test(cell));
-    const head = rows[0] || [];
-    const body = hasAlign ? rows.slice(2) : rows.slice(1);
-    out.push(`<table class="md-table"><thead><tr>${head.map((c) => `<th>${renderInlineMarkdown(c)}</th>`).join('')}</tr></thead><tbody>${body.map((r) => `<tr>${r.map((c) => `<td>${renderInlineMarkdown(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+    out.push(renderMarkdownTable(table, { wrapperClass: pendingTableClass }));
+    pendingTableClass = '';
     table = [];
   }
+  function flushBlocks() { flushParagraph(); flushList(); flushTable(); }
   for (const line of text.split('\n')) {
     const slot = line.match(/^\u0000(\d+)\u0000$/);
     if (slot) {
-      flushParagraph(); flushList(); flushTable();
+      flushBlocks();
+      pendingTableClass = '';
       out.push(slots[Number(slot[1])] || '');
       continue;
     }
-    if (!line.trim()) { flushParagraph(); flushList(); flushTable(); continue; }
+    const alignStart = line.match(/^:::\s*align\{(left|center|right)\}\s*$/i);
+    if (alignStart) {
+      flushBlocks();
+      pendingTableClass = '';
+      const align = alignStart[1].toLowerCase();
+      out.push(`<div class="md-align md-align-${esc(align)}">`);
+      alignDepth += 1;
+      continue;
+    }
+    if (/^:::\s*$/.test(line)) {
+      flushBlocks();
+      pendingTableClass = '';
+      if (alignDepth > 0) {
+        out.push('</div>');
+        alignDepth -= 1;
+      }
+      continue;
+    }
+    const cuteTable = line.match(/^::\s*cute-table(?:\{([a-zA-Z0-9_-]+)\})?\s*$/i);
+    if (cuteTable) {
+      flushBlocks();
+      pendingTableClass = cuteTableWrapperClass(cuteTable[1] || 'default');
+      continue;
+    }
+    if (!line.trim()) { flushBlocks(); continue; }
     const heading = line.match(/^(#{1,4})\s+(.+)$/);
     if (heading) {
-      flushParagraph(); flushList(); flushTable();
+      flushBlocks();
+      pendingTableClass = '';
       const level = heading[1].length + 1;
       out.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
       continue;
     }
     const bullet = line.match(/^\s*[-*+]\s+(.+)$/);
-    if (bullet) { flushParagraph(); flushTable(); list.push(bullet[1]); continue; }
+    if (bullet) { flushParagraph(); flushTable(); pendingTableClass = ''; list.push(bullet[1]); continue; }
     if (/^\s*\|.*\|\s*$/.test(line)) { flushParagraph(); flushList(); table.push(line); continue; }
     flushTable();
+    pendingTableClass = '';
     paragraph.push(line);
   }
-  flushParagraph(); flushList(); flushTable();
+  flushBlocks();
+  while (alignDepth > 0) {
+    out.push('</div>');
+    alignDepth -= 1;
+  }
   return out.join('\n') || '<p class="muted">暂无内容</p>';
 }
 
@@ -276,10 +379,11 @@ function prelimStatusBadge(q) {
   return '<span class="state-pill state-none">未做</span>';
 }
 function tagLabel(tag) {
+  const clean = (value) => String(value || '').replace(/\s*[·/]\s*topic\s*$/i, '').trim();
   if (tag === null || tag === undefined || tag === '') return '';
-  if (typeof tag === 'string') return tag;
-  if (typeof tag !== 'object') return String(tag);
-  return tag.nameZh || tag.name || tag.label || tag.slug || '';
+  if (typeof tag === 'string') return clean(tag);
+  if (typeof tag !== 'object') return clean(tag);
+  return clean(tag.nameZh || tag.name || tag.label || tag.slug || '');
 }
 function tagValue(tag) {
   if (tag === null || tag === undefined || tag === '') return '';
@@ -1340,11 +1444,21 @@ async function renderUserAdmin() {
   if (currentUser?.role !== 'admin') return renderLogin();
   const data = await api('/api/admin/users');
   app.innerHTML = `<div class="row space page-head"><div><h1>用户管理</h1></div><button onclick="nav('/admin')">返回后台</button></div>
-  <div class="card table-card"><table><thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>注册时间</th><th>操作</th></tr></thead><tbody>${data.users.map((u) => `<tr><td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${esc(u.createdAt)}</td><td class="table-actions-cell"><div class="table-action-row">${u.id === currentUser.id ? '<span class="muted">当前用户</span>' : `<button type="button" onclick="setUserRole(${u.id}, '${u.role === 'admin' ? 'user' : 'admin'}')">设为${u.role === 'admin' ? '普通用户' : '管理员'}</button>`}</div></td></tr>`).join('')}</tbody></table></div>`;
+  <div class="card table-card"><table><thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>注册时间</th><th>操作</th></tr></thead><tbody>${data.users.map((u) => {
+    const roleAction = u.id === currentUser.id
+      ? '<span class="muted">当前用户</span>'
+      : `<button type="button" onclick="setUserRole(${u.id}, '${u.role === 'admin' ? 'user' : 'admin'}')">设为${u.role === 'admin' ? '普通用户' : '管理员'}</button>`;
+    return `<tr><td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${esc(u.createdAt)}</td><td class="table-actions-cell"><div class="table-action-row">${roleAction}<button type="button" onclick="resetUserPassword(${u.id}, ${jsArg(u.username)})">重置密码</button></div></td></tr>`;
+  }).join('')}</tbody></table></div>`;
 }
 window.setUserRole = async (id, role) => runUiAction(async () => {
   await api(`/api/admin/users/${id}/role`, { method: 'PATCH', body: { role } });
   renderUserAdmin();
+});
+window.resetUserPassword = async (id, username) => runUiAction(async () => {
+  if (!confirm(`确认将用户 ${username} 的密码重置为 123456？`)) return null;
+  await api(`/api/admin/users/${id}/reset-password`, { method: 'POST' });
+  alert(`用户 ${username} 的密码已重置为 123456`);
 });
 
 async function renderProblemManage() {
@@ -1964,6 +2078,7 @@ function mdToolbar(targetName) {
     ${toolbarButton('公式', '$x$', '$', '$')}
     ${toolbarButton('代码块', '代码', '\n```cpp\n', '\n```\n')}
     <label class="md-tool-btn md-image-tool" title="插入图片">图片<input type="file" accept=".png,.jpg,.jpeg,.gif,.webp" data-md-image /></label>
+    <label class="md-tool-btn md-attachment-tool" title="上传附件并插入下载链接">附件<input type="file" accept=".zip,.7z,.rar,.tar,.gz,.tgz,.bz2,.xz,.pdf,.txt,.md,.in,.out,.ans,.png,.jpg,.jpeg,.gif,.webp,.doc,.docx,.xls,.xlsx" data-md-attachment /></label>
   </div>`;
 }
 
@@ -1988,7 +2103,7 @@ function currentProblemIdForAttachment(input) {
   const idInput = qs('[name="id"]', form);
   const id = String(idInput?.value || '').trim();
   if (!id) {
-    alert('请先填写题号，再上传本题附件图片。');
+    alert('请先填写题号，再上传本题附件。');
     return null;
   }
   if (!PROBLEM_ID_PATTERN.test(id)) {
@@ -2007,14 +2122,19 @@ async function uploadProblemAttachment(problemId, file) {
   return data;
 }
 
-async function insertImageIntoEditor(input, file) {
+function safeAttachmentLabel(name, fallback = '附件') {
+  return String(name || fallback).replace(/[\r\n\[\]]/g, '').trim() || fallback;
+}
+
+async function insertAttachmentIntoEditor(input, file, options = {}) {
   if (!input || !file) return;
-  if (!/^image\//.test(file.type || '')) {
+  const imageOnly = Boolean(options.imageOnly);
+  const isImage = /^image\//.test(file.type || '') || /\.(png|jpe?g|gif|webp)$/i.test(file.name || '');
+  if (imageOnly && !isImage) {
     alert('请选择图片文件，支持 png、jpg、jpeg、gif、webp。');
     return;
   }
-  const maxSize = 5 * 1024 * 1024;
-  if (file.size > maxSize) {
+  if (imageOnly && file.size > 5 * 1024 * 1024) {
     alert('图片不能超过 5MB。');
     return;
   }
@@ -2022,10 +2142,13 @@ async function insertImageIntoEditor(input, file) {
   if (!problemId) return;
   try {
     const result = await uploadProblemAttachment(problemId, file);
-    const name = (file.name || 'image').replace(/[\r\n\[\]]/g, '').trim() || 'image';
-    insertIntoTextarea(input, `\n![${name}](${result.url})\n`, '');
+    const name = safeAttachmentLabel(result.originalName || file.name || result.filename, isImage ? 'image' : '附件');
+    const markdown = (result.isImage || isImage)
+      ? `\n![${name}](${result.url})\n`
+      : `\n[${name}](${result.url})\n`;
+    insertIntoTextarea(input, markdown, '');
   } catch (err) {
-    alert(err.message || '图片上传失败，请重试。');
+    alert(err.message || '附件上传失败，请重试。');
   }
 }
 
@@ -2050,7 +2173,15 @@ function bindMarkdownEditors(root = document) {
       fileInput.addEventListener('click', (event) => event.stopPropagation());
       fileInput.addEventListener('change', () => {
         const file = fileInput.files?.[0];
-        if (file) insertImageIntoEditor(input, file);
+        if (file) insertAttachmentIntoEditor(input, file, { imageOnly: true });
+        fileInput.value = '';
+      });
+    });
+    qsa('[data-md-attachment]', toolbar).forEach((fileInput) => {
+      fileInput.addEventListener('click', (event) => event.stopPropagation());
+      fileInput.addEventListener('change', () => {
+        const file = fileInput.files?.[0];
+        if (file) insertAttachmentIntoEditor(input, file);
         fileInput.value = '';
       });
     });
@@ -2079,29 +2210,72 @@ function mdEditor(name, label, value = '', options = {}) {
 function selectedTagValues(tags = []) {
   return new Set((tags || []).map((tag) => tag?.slug || tag?.value || (typeof tag === 'string' ? tag : '')).filter(Boolean));
 }
+function tagSearchText(tag) {
+  return [
+    tagLabel(tag),
+    tag?.nameEn,
+    tag?.slug,
+    tag?.parentSlug,
+    tag?.description,
+  ].filter(Boolean).join(' ').toLocaleLowerCase();
+}
 function renderProblemTagSelector(allTags = [], selectedTags = []) {
   const selected = selectedTagValues(selectedTags);
-  const options = (allTags || [])
+  const items = (allTags || [])
     .filter((tag) => tag.scope !== 'prelim' && tag.level !== 'domain')
     .map((tag) => {
       const value = tag.slug || tag.value;
-      const label = tag.nameZh || tag.name || tag.label || value;
-      const meta = [tag.parentSlug, tag.level].filter(Boolean).join(' / ');
-      return `<option value="${esc(value)}" ${selected.has(value) ? 'selected' : ''}>${esc(label)}${value ? ` / ${esc(value)}` : ''}${meta ? ` · ${esc(meta)}` : ''}</option>`;
+      const label = tagLabel(tag) || value;
+      const search = tagSearchText(tag);
+      const sub = [tag.nameEn, value].filter(Boolean).join(' / ');
+      return `<label class="tag-check-option" data-tag-search="${esc(search)}">
+        <input type="checkbox" name="tags" value="${esc(value)}" ${selected.has(value) ? 'checked' : ''} />
+        <span class="tag-check-main">${esc(label)}</span>
+        ${sub ? `<span class="tag-check-sub">${esc(sub)}</span>` : ''}
+      </label>`;
     }).join('');
   return `<div class="form-block tag-picker-block">
-    <label>标签</label>
-    <select name="tags" multiple size="10" class="tag-multi-select">${options}</select>
-    <p class="muted small">按住 Ctrl 或 Command 可多选。系统保存 slug，页面统一展示对应的中文名称。</p>
+    <label class="editor-field-label">标签</label>
+    <input type="search" class="tag-search-input" placeholder="搜索标签，支持中文 / English / slug" aria-label="搜索标签" />
+    <div class="tag-check-list" role="group" aria-label="标签选择">${items || '<p class="muted small">暂无可选标签</p>'}</div>
+    <p class="muted small">勾选一个或多个标签。系统保存 slug，页面统一展示对应名称。</p>
   </div>`;
+}
+
+function bindTagPickers(root = document) {
+  qsa('.tag-picker-block', root).forEach((block) => {
+    const input = qs('.tag-search-input', block);
+    const options = qsa('.tag-check-option', block);
+    if (!input || !options.length || block.dataset.bound === '1') return;
+    block.dataset.bound = '1';
+    const empty = document.createElement('p');
+    empty.className = 'muted small tag-search-empty hidden';
+    empty.textContent = '没有匹配的标签';
+    qs('.tag-check-list', block)?.appendChild(empty);
+    const apply = () => {
+      const keyword = input.value.trim().toLocaleLowerCase();
+      let visible = 0;
+      options.forEach((option) => {
+        const ok = !keyword || String(option.dataset.tagSearch || '').toLocaleLowerCase().includes(keyword);
+        option.classList.toggle('hidden', !ok);
+        if (ok) visible += 1;
+      });
+      empty.classList.toggle('hidden', visible > 0);
+    };
+    input.addEventListener('input', apply);
+    apply();
+  });
 }
 
 function collectProblemForm(form, existingId) {
   const f = formData(form);
   const tagSelect = form.querySelector('select[name="tags"]');
-  const tags = tagSelect
-    ? Array.from(tagSelect.selectedOptions).map((option) => option.value).filter(Boolean)
-    : String(f.tags || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const tagChecks = form.querySelectorAll('input[name="tags"][type="checkbox"]:checked');
+  const tags = tagChecks.length
+    ? Array.from(tagChecks).map((input) => input.value).filter(Boolean)
+    : (tagSelect
+      ? Array.from(tagSelect.selectedOptions).map((option) => option.value).filter(Boolean)
+      : String(f.tags || '').split(',').map((x) => x.trim()).filter(Boolean));
   return {
     id: f.id || existingId || '',
     title: f.title,
@@ -2182,6 +2356,7 @@ async function renderProblemEditor(id) {
       </form>
     </div>`;
   bindMarkdownPreviews(qs('#problemForm'));
+  bindTagPickers(qs('#problemForm'));
   qs('#problemForm').onsubmit = (e) => saveProblemEditor(e, p, isNew);
 }
 

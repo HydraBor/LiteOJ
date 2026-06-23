@@ -114,8 +114,8 @@ docker info
 ```dotenv
 JWT_SECRET=replace-with-long-random-string
 JUDGE_TOKEN=replace-with-long-random-string
-ADMIN_USERNAME=Algor
-ADMIN_PASSWORD=Wuchuanmin_2003
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=admin123
 COOKIE_SECURE=auto
 ```
 
@@ -135,6 +135,7 @@ SPJ_MEMORY_LIMIT_MB=256
 ```dotenv
 TESTDATA_ZIP_LIMIT=50
 TESTDATA_UNZIPPED_LIMIT=200
+ATTACHMENT_FILE_LIMIT=200
 CHECKER_SOURCE_LIMIT=1
 ```
 
@@ -142,6 +143,7 @@ CHECKER_SOURCE_LIMIT=1
 
 - `TESTDATA_ZIP_LIMIT`：MB，zip 原始文件大小。
 - `TESTDATA_UNZIPPED_LIMIT`：MB，zip 解压后总大小。
+- `ATTACHMENT_FILE_LIMIT`：MB，题面附件单文件大小，默认用于 CSP 复赛数据包等下载附件。
 - `CHECKER_SOURCE_LIMIT`：MB，checker.cpp 源码大小。
 - `SPJ_TIMEOUT_MS`：毫秒，checker 单次运行时间。
 - `SPJ_MEMORY_LIMIT_MB`：MB，checker 单次运行内存。
@@ -151,14 +153,14 @@ CHECKER_SOURCE_LIMIT=1
 新数据库会使用 `.env` 中的：
 
 ```dotenv
-ADMIN_USERNAME=Algor
-ADMIN_PASSWORD=Wuchuanmin_2003
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=admin123
 ```
 
 已有数据库不会在每次启动时重置密码。忘记管理员密码时执行：
 
 ```bash
-docker compose exec app npm run reset-admin -- Algor Wuchuanmin_2003
+docker compose exec app npm run reset-admin -- admin admin123
 ```
 
 ## Docker Compose 手动部署
@@ -219,24 +221,140 @@ server {
 
 不要反代或暴露 `GO_JUDGE_PORT`。
 
-## 备份与恢复
+## 备份、恢复与清空 Docker 数据
 
-数据位于 Docker volume `liteoj_liteoj-data`。建议定期备份：
+LiteOJ 的持久数据默认位于 Docker volume `liteoj_liteoj-data`。如果你修改了 Compose project name，先确认实际 volume 名：
 
 ```bash
+docker volume ls | grep liteoj-data
+```
+
+数据内容包括：
+
+- `liteoj.db`：用户、编程题元数据、初赛题库、提交记录、模考记录；
+- `problems/<problemId>/testdata`：编程题测试数据；
+- `problems/<problemId>/attachments`：题面图片和下载附件；
+- `problems/<problemId>/checker.cpp`：Special Judge 源文件。
+
+### 全量备份
+
+建议停机备份，避免 SQLite 正在写入时生成不一致快照：
+
+```bash
+mkdir -p backups
+./start.sh stop
 docker run --rm \
   -v liteoj_liteoj-data:/data:ro \
   -v "$PWD/backups":/backup \
   busybox sh -c 'tar czf /backup/liteoj-data-$(date +%Y%m%d-%H%M%S).tgz -C /data .'
+cp .env "backups/liteoj-env-$(date +%Y%m%d-%H%M%S).bak"
+./start.sh
 ```
 
-恢复前请停止服务：
+这份备份同时包含编程题库、初赛题库、用户数据、提交记录、题面附件和测试数据。
+
+### 全量恢复
+
+恢复会覆盖当前 volume，请先确认备份文件名：
 
 ```bash
 ./start.sh stop
+docker run --rm \
+  -v liteoj_liteoj-data:/data \
+  -v "$PWD/backups":/backup \
+  busybox sh -c 'rm -rf /data/* /data/.[!.]* /data/..?*; tar xzf /backup/liteoj-data-YYYYMMDD-HHMMSS.tgz -C /data'
+./start.sh
 ```
 
-再解压备份到 volume。
+如果同时恢复 `.env`，请先检查 `JWT_SECRET`、`JUDGE_TOKEN` 和管理员密码是否符合当前服务器配置。
+
+### 清空 Docker 数据
+
+完整重置最简单，适合测试服或确认已备份后的重装：
+
+```bash
+./start.sh stop
+docker compose down -v
+./start.sh
+```
+
+这会删除所有用户、题目、初赛题库、提交记录、附件、测试数据和 checker。重新启动后，`scripts/init.js` 会再次导入内置示例数据。
+
+### 只清空用户数据
+
+保留编程题库和初赛题库，只删除普通用户、提交记录、初赛练习记录和模考记录，并把默认管理员重置为 `admin / admin123`：
+
+```bash
+./start.sh stop
+docker compose run --rm --no-deps app node - <<'NODE'
+const { db } = require('./backend/db');
+const { hashPassword } = require('./backend/passwords');
+
+db.transaction(() => {
+  db.prepare('DELETE FROM submissions').run();
+  db.prepare('DELETE FROM prelim_attempts').run();
+  db.prepare('DELETE FROM prelim_mock_exams').run();
+  db.prepare("DELETE FROM users WHERE username <> 'admin'").run();
+  const hash = hashPassword('admin123');
+  const admin = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
+  if (admin) {
+    db.prepare("UPDATE users SET password_hash = ?, role = 'admin' WHERE username = 'admin'").run(hash);
+  } else {
+    db.prepare("INSERT INTO users (username, password_hash, role) VALUES ('admin', ?, 'admin')").run(hash);
+  }
+})();
+NODE
+./start.sh
+```
+
+### 只清空编程题库
+
+保留用户和初赛题库，删除编程题、测试点、提交记录、题面附件和 checker：
+
+```bash
+./start.sh stop
+docker compose run --rm --no-deps app node - <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const { db, DATA_DIR } = require('./backend/db');
+
+db.transaction(() => {
+  db.prepare('DELETE FROM submissions').run();
+  db.prepare('DELETE FROM oj_problem_tags').run();
+  db.prepare('DELETE FROM problem_cases').run();
+  db.prepare('DELETE FROM problems').run();
+})();
+
+fs.rmSync(path.join(DATA_DIR, 'problems'), { recursive: true, force: true });
+fs.mkdirSync(path.join(DATA_DIR, 'problems'), { recursive: true });
+NODE
+./start.sh
+```
+
+重新启动后会恢复内置 `P1001` 示例题。如果你要部署完全空白题库，请在构建镜像前移走 `seed/problems`。
+
+### 只清空初赛题库
+
+保留用户和编程题库，删除初赛试卷、小题、练习记录和模考记录：
+
+```bash
+./start.sh stop
+docker compose run --rm --no-deps app node - <<'NODE'
+const { db } = require('./backend/db');
+
+db.transaction(() => {
+  db.prepare('DELETE FROM prelim_attempts').run();
+  db.prepare('DELETE FROM prelim_mock_exams').run();
+  db.prepare('DELETE FROM oj_prelim_question_tags').run();
+  db.prepare('DELETE FROM prelim_questions').run();
+  db.prepare('DELETE FROM prelim_groups').run();
+  db.prepare('DELETE FROM prelim_papers').run();
+})();
+NODE
+./start.sh
+```
+
+重新启动后会恢复内置 CSP-J/S 初赛种子数据。如果你要部署完全空白初赛题库，请在构建镜像前移走 `seed/prelim`。
 
 ## 升级
 

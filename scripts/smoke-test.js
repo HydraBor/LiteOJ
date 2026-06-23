@@ -171,6 +171,7 @@ assert(appJs.includes('window.startMockExam = async'), 'mock start handler shoul
 
 assert(appJs.includes('/logo-mark.svg'), 'auth page should use the SVG LiteOJ mark');
 assert(appJs.includes('async function renderProfile') && appJs.includes('/api/profile/password') && appJs.includes("path === '/profile'"), 'frontend should provide a profile page for password changes');
+assert(appJs.includes('resetUserPassword') && appJs.includes('/reset-password') && appJs.includes('123456'), 'user admin page should expose password reset to 123456');
 assert(appJs.includes("routeAnchor('/profile'"), 'logged-in user box should link to the profile page');
 assert(!appJs.includes('<h1>提交记录</h1>'), 'submissions page should not render a redundant page title');
 assert(appJs.includes('clearSubmissionPoll') && appJs.includes('location.pathname !== expectedPath'), 'submission polling should stop refreshing after the user leaves the submission page');
@@ -205,10 +206,12 @@ assert(serverJs.includes("app.disable('x-powered-by')") && serverJs.includes('se
 assert(serverJs.includes("res.setHeader('Cache-Control', 'no-cache')"), 'SPA fallback should set a Cache-Control header');
 const authJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'auth.js'), 'utf8');
 const authRoutesJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'auth.js'), 'utf8');
+const adminRoutesJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'admin.js'), 'utf8');
 assert(securityJs.includes('function createRateLimit') && securityJs.includes('Retry-After'), 'security helper should expose lightweight API rate limiting');
 assert(authRoutesJs.includes('hashPassword(password)') && authRoutesJs.includes('verifyPassword(password, row.password_hash)') && !authRoutesJs.includes('bcrypt.compareSync'), 'auth routes should use centralized bcrypt password helpers');
 assert(authRoutesJs.includes('LOGIN_RATE_LIMIT') && authRoutesJs.includes('REGISTER_RATE_LIMIT'), 'auth routes should rate-limit login and registration');
 assert(authRoutesJs.includes("process.env.NODE_ENV !== 'production'"), 'production registration should not let the first public registrant become admin');
+assert(adminRoutesJs.includes("router.post('/users/:id/reset-password'") && adminRoutesJs.includes("DEFAULT_RESET_PASSWORD = '123456'") && adminRoutesJs.includes('hashPassword(DEFAULT_RESET_PASSWORD)'), 'admin routes should reset user passwords to 123456 using bcrypt');
 assert(authJs.includes('SELECT id, username, role FROM users WHERE id = ?'), 'auth should validate token user still exists before using foreign-keyed user_id');
 assert(authJs.includes('JWT_SECRET must be set to a strong random value in production'), 'production should reject missing or weak JWT_SECRET');
 assert(authJs.includes('clearAuthCookie(req, res)'), 'stale login cookie should be cleared with request-aware cookie attributes');
@@ -239,9 +242,9 @@ assert(!deployServiceScript.includes('JUDGE_EXECUTOR') && deployServiceScript.in
 assert(deployServiceScript.includes('ensure_web_port_available') && deployServiceScript.includes('LITEOJ_AUTO_PORT'), 'start script should auto-select a free web port when the default port is occupied');
 assert(deployServiceScript.includes('ensure_go_judge_port_available') && deployServiceScript.includes('LITEOJ_GO_JUDGE_PORT_SCAN_END'), 'start script should auto-select a free go-judge port when 5050 is occupied');
 assert(deployServiceScript.includes('/dev/tcp/127.0.0.1/$port'), 'port detection should also probe loopback so WSL/Docker Desktop notices Windows-side listeners');
-assert(deployEnvScript.includes('ADMIN_USERNAME=Algor') && deployEnvScript.includes('ADMIN_PASSWORD=Wuchuanmin_2003'), 'one-click script should initialize the configured admin account');
+assert(deployEnvScript.includes('ADMIN_USERNAME=admin') && deployEnvScript.includes('ADMIN_PASSWORD=admin123'), 'one-click script should initialize the configured admin account');
 assert(deployEnvScript.includes('CHECKER_SOURCE_LIMIT=1') && deployEnvScript.includes('SPJ_TIMEOUT_MS=3000') && deployEnvScript.includes('SPJ_MEMORY_LIMIT_MB=256'), 'one-click script should initialize Special Judge limits');
-assert(deployEnvScript.includes('ensure_plain_key ADMIN_USERNAME Algor') && deployEnvScript.includes('is_placeholder "$(env_value ADMIN_PASSWORD)"'), 'one-click script should not reset existing admin credentials on every start');
+assert(deployEnvScript.includes('ensure_plain_key ADMIN_USERNAME admin') && deployEnvScript.includes('is_placeholder "$(env_value ADMIN_PASSWORD)"'), 'one-click script should not reset existing admin credentials on every start');
 assert(deployServiceScript.includes('start_judge()') && deployServiceScript.includes('judge/worker.js'), 'one-click script should start a host judge worker');
 assert(deployDockerScript.includes('mirrors.tuna.tsinghua.edu.cn/docker-ce') && deployDockerScript.includes('docker.1ms.run') && deployDockerScript.includes('Preparing base image debian:bookworm-slim') && deployDockerScript.includes('prepare_go_judge_binary'), 'deployment should prefer domestic Docker apt/registry mirrors and prepare go-judge outside Docker Hub mirrors');
 
@@ -252,14 +255,18 @@ assert.deepStrictEqual(seedProblemJson.tags, ['simulation'], 'seed A+B problem s
 const initJs = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'init.js'), 'utf8');
 const resetAdminJs = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'reset-admin.js'), 'utf8');
 assert(initJs.includes('shouldRefreshSample') && initJs.includes('数学公式示例') && initJs.includes("raw.id === 'P1001'") && initJs.includes("existingTags === '[]'"), 'init should refresh stored P1001 statement/tags when rerun');
-assert(initJs.includes("DEFAULT_ADMIN_USERNAME = 'Algor'") && initJs.includes("DEFAULT_ADMIN_PASSWORD = 'Wuchuanmin_2003'"), 'init should use the configured default admin credentials');
+assert(initJs.includes("DEFAULT_ADMIN_USERNAME = 'admin'") && initJs.includes("DEFAULT_ADMIN_PASSWORD = 'admin123'"), 'init should use the configured default admin credentials');
 assert(initJs.includes('hashPassword(password)') && !initJs.includes('bcrypt.hashSync'), 'init should use centralized bcrypt password helpers');
 assert(initJs.includes('Admin seed skipped; existing admin user') && initJs.includes("UPDATE users SET role = 'admin'"), 'init should not reset existing admin passwords and should recover databases without an admin');
-assert(initJs.includes('ADMIN_PASSWORD must be set to a strong initial password in production'), 'production initialization should reject weak admin passwords');
+assert(initJs.includes('ADMIN_PASSWORD must be at least 6 characters'), 'initial admin password should follow the shared minimum length rule');
 assert(resetAdminJs.includes('existingTarget') && resetAdminJs.includes("UPDATE users SET password_hash = ?, role = 'admin'") && resetAdminJs.includes('existingAdmin'), 'admin reset should handle an existing target username before renaming another admin');
 
 const routes = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'problems.js'), 'utf8');
+const problemFilesJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'problem-files.js'), 'utf8');
 assert(routes.includes('TESTDATA_UNZIPPED_LIMIT') && routes.includes('测试数据解压后总大小不能超过'), 'zip upload should limit total uncompressed testdata size');
+assert(routes.includes('ATTACHMENT_FILE_LIMIT') && routes.includes('multer.diskStorage') && routes.includes("'.zip'"), 'problem attachments should support bounded disk-backed download files');
+assert(routes.includes('tempAttachmentFileName') && routes.includes('contentDispositionAttachment'), 'problem attachments should use random temporary names and stable download names');
+assert(problemFilesJs.includes('function sanitizeAttachmentFileName') && !problemFilesJs.includes('return `${Date.now()}_'), 'attachment final filenames should preserve the uploaded basename instead of adding random prefixes');
 assert(routes.includes("['publish', 'public', 'show']") && routes.includes("['hide', 'hidden']"), 'problem batch visibility actions should accept configured action aliases');
 assert(routes.includes('copyAttachmentsAndRewriteDescription'), 'clone should copy and rewrite attachment URLs');
 for (const route of ["router.patch('/:id/status'", "router.post('/:id/status'", "router.post('/:id/clone'", "router.post('/:id/attachments'", "router.get('/:id/attachments/:filename'", "router.get('/:id/checker'", "router.post('/:id/checker'", "router.delete('/:id/checker'", "router.delete('/:id'", "router.get('/:id/cases'", "router.get('/:id/cases/:caseId'", "router.post('/:id/cases'", "router.post('/:id/cases/zip'", "router.put('/:id/cases/bulk'", "router.delete('/:id/cases/:caseId'", "router.post('/:id/rejudge'", "router.post('/:id/submit'"]) {
@@ -268,6 +275,11 @@ for (const route of ["router.patch('/:id/status'", "router.post('/:id/status'", 
 assert(appJs.includes('raw.replace(/\\\\\\\((.+?)\\\\\\\)/g') || appJs.includes('raw.replace(/\\\\\((.+?)\\\\\)/g'), 'inline markdown should support \\(...\\) KaTeX math');
 assert(appJs.includes('text.replace(/\\\\\\\[([\\s\\S]*?)\\\\\\\]/g') || appJs.includes('text.replace(/\\\\\[([\\s\\S]*?)\\\\\]/g'), 'markdown should support \\[...\\] display math');
 assert(!appJs.includes('readAsDataURL'), 'Markdown image upload must not inline base64 data URLs');
+assert(appJs.includes('isMarkdownTableAlignRow') && appJs.includes('rowspan=') && appJs.includes("String(text).trim() === '^'"), 'Markdown table renderer should support alignment rows and ^ vertical merges');
+assert(appJs.includes('normalizeBrokenMarkdownLinks') && appJs.includes('cuteTableWrapperClass') && appJs.includes('md-align'), 'Markdown renderer should support split image links plus :::align and ::cute-table directives');
+assert(appJs.includes('data-md-attachment') && appJs.includes('insertAttachmentIntoEditor'), 'Markdown toolbar should upload non-image attachments and insert links');
+assert(appJs.includes('tag-search-input') && appJs.includes('tag-check-option') && appJs.includes('data-tag-search') && appJs.includes('type="checkbox" name="tags"'), 'problem editor should use searchable checkbox tag selection');
+assert(!appJs.includes(' · ${esc(meta)}'), 'problem tag selector should not show level suffixes such as · topic');
 const styleCss = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public', 'style.css'), 'utf8');
 assert(styleCss.includes('.table-action-row'), 'management table buttons should use an inner flex row so td borders stay aligned');
 assert(styleCss.includes('td.actions.table-actions'), 'compatibility table action td should remain a table-cell, not a flex row');
@@ -276,6 +288,8 @@ assert(!outsideUiNamePattern.test(styleCss) && !cssModuleNamePattern.test(styleC
 assert(styleCss.includes('.button-row'), 'button rows should use shared spacing class');
 assert(styleCss.includes('-webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);'), 'fixed header should list -webkit-backdrop-filter before backdrop-filter');
 assert(styleCss.includes('-webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);'), 'editor footer should include Safari backdrop-filter prefix');
+assert(styleCss.includes('.tag-check-list') && styleCss.includes('.tag-search-input') && styleCss.includes('.align-center'), 'stylesheet should support tag checkbox search and Markdown table alignment');
+assert(styleCss.includes('.md-align-center') && styleCss.includes('.md-cute-table'), 'stylesheet should support custom Markdown alignment and cute table rendering');
 assert(appJs.includes('function enhanceFormAccessibility') && appJs.includes('ensureControlId') && appJs.includes('aria-label'), 'dynamic forms should be normalized with id/name/label accessibility helpers');
 
 assert(appJs.includes("routeLink('/admin/problem/new', '新增题目'"), 'admin new-problem entry should be a real link, not a fragile inline-only button');
@@ -332,6 +346,7 @@ const docsText = [
   'docs/FINAL_REVIEW.md',
 ].map((file) => fs.readFileSync(path.join(__dirname, '..', file), 'utf8')).join('\n');
 assert(docsText.includes('Special Judge') && docsText.includes('checker.cpp') && docsText.includes('go-judge') && docsText.includes('SPJ_TIMEOUT_MS'), 'documentation should cover go-judge, Special Judge, checker.cpp, and SPJ deployment limits');
+assert(docsText.includes('::cute-table') && docsText.includes(':::align') && docsText.includes('清空 Docker 数据'), 'documentation should cover custom problem Markdown directives and Docker data cleanup');
 assert(!docsText.includes('liteoj.sh') && !docsText.includes('浮点误差比较') && !docsText.includes('输出比较配置'), 'documentation should not keep retired launcher or legacy compare-mode wording');
 
 console.log('Smoke tests passed: programming problems, go-judge execution, and CSP preliminary question bank logic look consistent.');

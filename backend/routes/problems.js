@@ -3,7 +3,7 @@ const AdmZip = require('adm-zip');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
-const { db, problemFromRow, caseFromRow } = require('../db');
+const { db, DATA_DIR, problemFromRow, caseFromRow } = require('../db');
 const { requireLogin, requireAdmin } = require('../auth');
 const {
   normalizeDifficulty,
@@ -37,11 +37,41 @@ const {
 } = require('../problem-files');
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Number(process.env.TESTDATA_ZIP_LIMIT || 50) * 1024 * 1024 } });
-const attachmentUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Number(process.env.ATTACHMENT_IMAGE_LIMIT || 5) * 1024 * 1024 } });
+const TESTDATA_ZIP_LIMIT_BYTES = Number(process.env.TESTDATA_ZIP_LIMIT || 50) * 1024 * 1024;
+const ATTACHMENT_FILE_LIMIT_BYTES = Number(process.env.ATTACHMENT_FILE_LIMIT || 200) * 1024 * 1024;
+const CHECKER_SOURCE_LIMIT_BYTES = Number(process.env.CHECKER_SOURCE_LIMIT || 1) * 1024 * 1024;
+const ATTACHMENT_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.webp',
+  '.zip', '.7z', '.rar', '.tar', '.gz', '.tgz', '.bz2', '.xz',
+  '.pdf', '.txt', '.md', '.in', '.out', '.ans',
+  '.doc', '.docx', '.xls', '.xlsx',
+]);
+const IMAGE_ATTACHMENT_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
+function attachmentTempDir() {
+  const dir = path.join(DATA_DIR, '.tmp', 'attachments');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+function tempAttachmentFileName(file) {
+  const safe = sanitizeAttachmentFileName(file?.originalname || 'attachment');
+  return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safe}`;
+}
+function contentDispositionAttachment(filename) {
+  const safe = sanitizeAttachmentFileName(filename);
+  const fallback = safe.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_') || 'attachment';
+  const encoded = encodeURIComponent(safe).replace(/['()*]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: TESTDATA_ZIP_LIMIT_BYTES } });
+const attachmentUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, attachmentTempDir()),
+    filename: (_req, file, cb) => cb(null, tempAttachmentFileName(file)),
+  }),
+  limits: { fileSize: ATTACHMENT_FILE_LIMIT_BYTES },
+});
 const checkerUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Number(process.env.CHECKER_SOURCE_LIMIT || 1) * 1024 * 1024 } });
 const TESTDATA_UNZIPPED_LIMIT_BYTES = Number(process.env.TESTDATA_UNZIPPED_LIMIT || 200) * 1024 * 1024;
-const CHECKER_SOURCE_LIMIT_BYTES = Number(process.env.CHECKER_SOURCE_LIMIT || 1) * 1024 * 1024;
 
 function getParamId(req) { return requireProblemCode(req.params.id); }
 
@@ -403,16 +433,31 @@ router.delete('/:id', requireAdmin, (req, res, next) => {
 router.post('/:id/attachments', requireAdmin, attachmentUpload.single('file'), (req, res, next) => {
   try {
     const problemId = getParamId(req);
-    if (!req.file) return res.status(400).json({ error: '请上传图片文件' });
+    if (!req.file) return res.status(400).json({ error: '请上传附件文件' });
+    const filename = sanitizeAttachmentFileName(req.file.originalname || req.file.filename || 'attachment');
     const mime = String(req.file.mimetype || '').toLowerCase();
-    const ext = path.extname(req.file.originalname || '').toLowerCase();
-    const allowedExt = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
-    if (!mime.startsWith('image/') || !allowedExt.has(ext)) {
-      return res.status(400).json({ error: '仅支持 png、jpg、jpeg、gif、webp 图片' });
+    const ext = path.extname(filename).toLowerCase();
+    if (!ATTACHMENT_EXTENSIONS.has(ext)) {
+      fs.rmSync(req.file.path, { force: true });
+      return res.status(400).json({ error: '不支持的附件类型，请上传图片、zip/7z/rar/tar 压缩包、PDF、文本或 Office 文件' });
     }
-    const filename = sanitizeAttachmentFileName(req.file.originalname || `image${ext || '.png'}`);
-    fs.writeFileSync(path.join(attachmentDir(problemId), filename), req.file.buffer);
-    res.json({ ok: true, filename, url: `/api/problems/${encodeURIComponent(problemId)}/attachments/${encodeURIComponent(filename)}` });
+    const target = path.join(attachmentDir(problemId), filename);
+    try {
+      fs.renameSync(req.file.path, target);
+    } catch (moveErr) {
+      fs.rmSync(req.file.path, { force: true });
+      throw moveErr;
+    }
+    const isImage = mime.startsWith('image/') && IMAGE_ATTACHMENT_EXTENSIONS.has(ext);
+    res.json({
+      ok: true,
+      filename,
+      originalName: filename,
+      mime,
+      size: req.file.size,
+      isImage,
+      url: `/api/problems/${encodeURIComponent(problemId)}/attachments/${encodeURIComponent(filename)}`,
+    });
   } catch (err) { return sendRouteError(res, err, next); }
 });
 
@@ -420,7 +465,7 @@ router.get('/:id/attachments/:filename', (req, res, next) => {
   try {
     const problemId = getParamId(req);
     const row = db.prepare('SELECT is_public FROM problems WHERE id = ?').get(problemId);
-    if (!row) return res.status(404).json({ error: '题目不存在' });
+    if (!row && req.user?.role !== 'admin') return res.status(404).json({ error: '题目不存在' });
     if (row && !row.is_public && req.user?.role !== 'admin') return res.status(403).json({ error: '题目未公开' });
     const filename = path.basename(String(req.params.filename || ''));
     if (!filename) return res.status(404).end();
@@ -428,6 +473,9 @@ router.get('/:id/attachments/:filename', (req, res, next) => {
     const dir = path.resolve(attachmentDir(problemId));
     if (!filePath.startsWith(dir + path.sep)) return res.status(400).json({ error: '非法文件路径' });
     if (!fs.existsSync(filePath)) return res.status(404).end();
+    if (!IMAGE_ATTACHMENT_EXTENSIONS.has(path.extname(filename).toLowerCase())) {
+      res.setHeader('Content-Disposition', contentDispositionAttachment(filename));
+    }
     res.sendFile(filePath);
   } catch (err) { return sendRouteError(res, err, next); }
 });

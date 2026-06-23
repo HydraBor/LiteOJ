@@ -9,8 +9,8 @@ const { initializeTagSystem, normalizeTagList, syncProblemTags, syncPrelimQuesti
 migrate();
 initializeTagSystem(db);
 
-const DEFAULT_ADMIN_USERNAME = 'Algor';
-const DEFAULT_ADMIN_PASSWORD = 'Wuchuanmin_2003';
+const DEFAULT_ADMIN_USERNAME = 'admin';
+const DEFAULT_ADMIN_PASSWORD = 'admin123';
 
 
 function copyDirIfNeeded(src, dest) {
@@ -114,8 +114,8 @@ function seedAdmin() {
   const username = process.env.ADMIN_USERNAME || DEFAULT_ADMIN_USERNAME;
   const password = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
   const createAdmin = () => {
-    if (process.env.NODE_ENV === 'production' && (!password || password.length < 10)) {
-      throw new Error('ADMIN_PASSWORD must be set to a strong initial password in production');
+    if (!password || password.length < 6) {
+      throw new Error('ADMIN_PASSWORD must be at least 6 characters');
     }
     db.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)')
       .run(username, hashPassword(password), 'admin');

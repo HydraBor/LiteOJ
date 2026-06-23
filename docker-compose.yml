@@ -16,7 +16,7 @@ services:
       DATABASE_PATH: /app/data/liteoj.db
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
       JUDGE_TOKEN: ${JUDGE_TOKEN:?JUDGE_TOKEN must be set in .env}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-Algor}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set in .env}
       TESTDATA_ZIP_LIMIT: ${TESTDATA_ZIP_LIMIT:-50}
       TESTDATA_UNZIPPED_LIMIT: ${TESTDATA_UNZIPPED_LIMIT:-200}

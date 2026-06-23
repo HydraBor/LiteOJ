@@ -61,7 +61,7 @@ async function main() {
     assert((await res.text()).includes('<main id="app"'), `SPA route ${route} should return frontend app shell`);
   }
 
-  await request('POST', '/api/auth/login', { username: 'Algor', password: 'Wuchuanmin_2003' });
+  await request('POST', '/api/auth/login', { username: 'admin', password: 'admin123' });
   const me = await request('GET', '/api/auth/me');
   assert.strictEqual(me.user.role, 'admin', 'admin login should work');
   const tagList = await request('GET', '/api/tags?scope=programming');
@@ -70,6 +70,14 @@ async function main() {
 
   const problemId = `T${Date.now()}`;
   const cloneId = `C${Date.now()}`;
+  const pendingAttachmentId = `U${Date.now()}`;
+  const pendingImageFd = new FormData();
+  pendingImageFd.set('file', new Blob([Buffer.from('fake-png')], { type: 'image/png' }), 'preview.png');
+  const pendingImage = await request('POST', `/api/problems/${encodeURIComponent(pendingAttachmentId)}/attachments`, pendingImageFd);
+  assert.strictEqual(pendingImage.filename, 'preview.png', 'pending problem image should keep the uploaded filename');
+  const pendingImageRes = await fetch(`http://127.0.0.1:${port}${pendingImage.url}`, { headers: { Cookie: cookie } });
+  assert.strictEqual(pendingImageRes.status, 200, 'admin should preview uploaded images before the new problem is saved');
+
   const created = await request('POST', '/api/problems', {
     id: problemId,
     title: '烟测新增题',
@@ -99,6 +107,17 @@ async function main() {
   assert.strictEqual(updated.problem.title, '烟测编辑题', 'problem edit should update title');
   assert.strictEqual(updated.problem.checkerMode, 'special_judge', 'problem edit should update checker mode');
   assert(updated.problem.tags.some((tag) => tag.slug === 'array-basic' && tag.name === '数组'), 'problem edit should keep fixed tag display names');
+
+  const attachmentFd = new FormData();
+  attachmentFd.set('file', new Blob([Buffer.from('sample-data')], { type: 'application/zip' }), 'down.zip');
+  const attachment = await request('POST', `/api/problems/${encodeURIComponent(problemId)}/attachments`, attachmentFd);
+  assert.strictEqual(attachment.filename, 'down.zip', 'attachment final filename should preserve the uploaded basename');
+  assert.strictEqual(attachment.originalName, 'down.zip', 'attachment upload should preserve the original display name');
+  assert.strictEqual(attachment.isImage, false, 'zip attachment should be treated as a download link');
+  assert(attachment.url.endsWith('/attachments/down.zip'), 'attachment URL should not include a random rename prefix');
+  const attachmentRes = await fetch(`http://127.0.0.1:${port}${attachment.url}`, { headers: { Cookie: cookie } });
+  assert.strictEqual(attachmentRes.status, 200, 'uploaded attachment should be downloadable');
+  assert((attachmentRes.headers.get('content-disposition') || '').includes('attachment'), 'non-image attachment should be served as a download');
 
   const checkerSource = '#include "testlib.h"\nint main(int argc, char* argv[]) { registerTestlibCmd(argc, argv); long long x = ouf.readLong(); long long y = ans.readLong(); if (x != y) quitf(_wa, "expected %lld found %lld", y, x); quitf(_ok, "ok"); }\n';
   const checkerFd = new FormData();
@@ -173,6 +192,15 @@ async function main() {
 
   await request('DELETE', `/api/problems/${encodeURIComponent(cloneId)}`);
   await request('DELETE', `/api/problems/${encodeURIComponent(problemId)}`);
+  const resetUserName = `u${Date.now()}`;
+  const registered = await request('POST', '/api/auth/register', { username: resetUserName, password: 'oldpass1' });
+  assert.strictEqual(registered.user.role, 'user', 'new public registrant should be a normal user');
+  await request('POST', '/api/auth/login', { username: 'admin', password: 'admin123' });
+  const resetResult = await request('POST', `/api/admin/users/${registered.user.id}/reset-password`);
+  assert.strictEqual(resetResult.password, '123456', 'admin reset should return the fixed reset password');
+  await request('POST', '/api/auth/login', { username: resetUserName, password: '123456' });
+  const resetMe = await request('GET', '/api/auth/me');
+  assert.strictEqual(resetMe.user.username, resetUserName, 'user should be able to login with the reset password');
   console.log('Real smoke test passed: admin create/edit/cases/zip/clone/status/delete, submit, prelim list, and mock flow work.');
 }
 

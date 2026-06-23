@@ -1,12 +1,12 @@
 const { db, migrate } = require('../backend/db');
 const { hashPassword, validateNewPassword } = require('../backend/passwords');
 
-const DEFAULT_ADMIN_USERNAME = 'Algor';
-const DEFAULT_ADMIN_PASSWORD = 'Wuchuanmin_2003';
+const DEFAULT_ADMIN_USERNAME = 'admin';
+const DEFAULT_ADMIN_PASSWORD = 'admin123';
 
 function usage() {
   console.error('Usage: node scripts/reset-admin.js [username] [password]');
-  console.error('       ADMIN_USERNAME=Algor ADMIN_PASSWORD=Wuchuanmin_2003 npm run reset-admin');
+  console.error('       ADMIN_USERNAME=admin ADMIN_PASSWORD=admin123 npm run reset-admin');
 }
 
 function main() {

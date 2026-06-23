@@ -89,10 +89,14 @@ LiteOJ 前端是无构建步骤的单页应用：
 题目文件位于 `DATA_DIR/problems/<problemId>/`：
 
 ```text
-attachments/       题面图片
+attachments/       题面图片和下载附件
 testdata/          .in/.out/.ans 文件
 checker.cpp        Special Judge 源文件
 ```
+
+附件通过 `/api/problems/:id/attachments/:filename` 访问。上传时使用随机临时文件名，落盘后保留安全化后的原始 basename，便于 CSP 复赛大数据包在题面中保持可读链接。
+
+题面 Markdown 在前端渲染，支持 KaTeX、代码块、标准表格、表格 `^` 纵向合并、`:::align{center}` 对齐块和 `::cute-table{tuack}` 样式块。附件图片使用标准 `![说明](url)` 语法，下载附件使用 `[文件名](url)`。
 
 ## 编程题工作流
 

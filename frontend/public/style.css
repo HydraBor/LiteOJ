@@ -125,6 +125,31 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospac
 }
 .tag-multi-select option { padding: 5px 7px; border-radius: 6px; }
 .tag-search-input { max-width: 420px; }
+.tag-selected-box {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 10px;
+  padding: 10px;
+  border: 1px solid #dfe7f5;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+.tag-selected-title { color: var(--muted); font-size: 12px; font-weight: 800; }
+.tag-selected-list { display: flex; flex-wrap: wrap; gap: 7px; min-height: 28px; align-items: center; }
+.tag-selected-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border-color: #c7d7f5;
+  background: #eef5ff;
+  color: #1b4e9b;
+  font-size: 12px;
+  font-weight: 800;
+}
+.tag-selected-chip span { color: #6b7d9d; font-size: 14px; line-height: 1; }
 .tag-check-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));

@@ -24,6 +24,10 @@ function esc(s) {
 function jsArg(value) {
   return JSON.stringify(String(value ?? ''));
 }
+function cssEscape(value) {
+  if (window.CSS?.escape) return window.CSS.escape(String(value ?? ''));
+  return String(value ?? '').replace(/["\\\]]/g, '\\$&');
+}
 function problemUrl(id) {
   return encodeURIComponent(String(id ?? ''));
 }
@@ -346,6 +350,7 @@ function languageLabel(value) {
   return item ? item.label : String(value || '未知');
 }
 const PROBLEM_ID_PATTERN = /^[A-Z]+\d+(?:T\d+)?$/;
+const PROBLEM_ROUTE_PATTERN = '([A-Z]+\\d+(?:T\\d+)?)';
 function validateProblemIdForUI(value) {
   const id = String(value || '').trim();
   if (!PROBLEM_ID_PATTERN.test(id)) {
@@ -1447,9 +1452,19 @@ async function renderUserAdmin() {
   <div class="card table-card"><table><thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>注册时间</th><th>操作</th></tr></thead><tbody>${data.users.map((u) => {
     const roleAction = u.id === currentUser.id
       ? '<span class="muted">当前用户</span>'
-      : `<button type="button" onclick="setUserRole(${u.id}, '${u.role === 'admin' ? 'user' : 'admin'}')">设为${u.role === 'admin' ? '普通用户' : '管理员'}</button>`;
-    return `<tr><td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${esc(u.createdAt)}</td><td class="table-actions-cell"><div class="table-action-row">${roleAction}<button type="button" onclick="resetUserPassword(${u.id}, ${jsArg(u.username)})">重置密码</button></div></td></tr>`;
+      : `<button type="button" data-user-action="role" data-user-id="${esc(u.id)}" data-role="${u.role === 'admin' ? 'user' : 'admin'}">设为${u.role === 'admin' ? '普通用户' : '管理员'}</button>`;
+    return `<tr><td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${esc(u.createdAt)}</td><td class="table-actions-cell"><div class="table-action-row">${roleAction}<button type="button" data-user-action="reset" data-user-id="${esc(u.id)}" data-username="${attrEsc(u.username)}">重置密码</button></div></td></tr>`;
   }).join('')}</tbody></table></div>`;
+  bindUserAdminActions();
+}
+
+function bindUserAdminActions() {
+  qsa('[data-user-action="role"]').forEach((btn) => {
+    btn.addEventListener('click', () => setUserRole(Number(btn.dataset.userId), btn.dataset.role || 'user'));
+  });
+  qsa('[data-user-action="reset"]').forEach((btn) => {
+    btn.addEventListener('click', () => resetUserPassword(Number(btn.dataset.userId), btn.dataset.username || ''));
+  });
 }
 window.setUserRole = async (id, role) => runUiAction(async () => {
   await api(`/api/admin/users/${id}/role`, { method: 'PATCH', body: { role } });
@@ -1457,8 +1472,9 @@ window.setUserRole = async (id, role) => runUiAction(async () => {
 });
 window.resetUserPassword = async (id, username) => runUiAction(async () => {
   if (!confirm(`确认将用户 ${username} 的密码重置为 123456？`)) return null;
-  await api(`/api/admin/users/${id}/reset-password`, { method: 'POST' });
-  alert(`用户 ${username} 的密码已重置为 123456`);
+  const result = await api(`/api/admin/users/${id}/reset-password`, { method: 'POST' });
+  alert(`用户 ${username} 的密码已重置为 ${result.password || '123456'}`);
+  renderUserAdmin();
 });
 
 async function renderProblemManage() {
@@ -1738,11 +1754,11 @@ function analyticsGroupSelect(groups = [], selected = '') {
   const valid = new Set([...(groups || []), ...list]);
   return `<select name="groupName" class="analytics-group-select"><option value="" ${selected ? '' : 'selected'}>请选择组别</option>${list.filter((g) => valid.has(g)).map((g) => `<option value="${esc(g)}" ${selected === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>`;
 }
-function analyticsRoundSelect(rounds = [], selected = '初赛') {
+function analyticsRoundSelect(rounds = [], selected = '') {
   const list = ['初赛', '复赛'];
   const valid = new Set([...(rounds || []), ...list]);
-  const value = selected || '初赛';
-  return `<select name="roundName" class="analytics-round-select">${list.filter((r) => valid.has(r)).map((r) => `<option value="${esc(r)}" ${value === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>`;
+  const value = selected || '';
+  return `<select name="roundName" class="analytics-round-select"><option value="" ${value ? '' : 'selected'}>请选择场次</option>${list.filter((r) => valid.has(r)).map((r) => `<option value="${esc(r)}" ${value === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>`;
 }
 function analyticsCountBarChart(counts = []) {
   const shown = counts;
@@ -1812,16 +1828,28 @@ function analyticsYearCompare(stats) {
   }).join('')}</tbody></table></div>`;
 }
 
+function analyticsFinalYearCompare(stats) {
+  const byYear = stats.byYear || [];
+  const tags = (stats.counts || []).map((x) => x.tag);
+  if (!byYear.length || !tags.length) return '<p class="muted">暂无可统计的年份对比数据。</p>';
+  return `<div class="analytics-compare-table"><table><thead><tr><th>考点</th>${byYear.map((year) => `<th>${esc(year.year)}</th>`).join('')}<th>总次数</th></tr></thead><tbody>${tags.map((tag) => {
+    const values = byYear.map((year) => year.tags.find((x) => x.tag === tag) || { count: 0, percent: 0 });
+    const sum = values.reduce((s, x) => s + Number(x.count || 0), 0);
+    return `<tr><td><b>${esc(tag)}</b></td>${values.map((v) => `<td><div class="year-score">${esc(v.count)} 次</div></td>`).join('')}<td><b>${esc(sum)} 次</b></td></tr>`;
+  }).join('')}</tbody></table></div>`;
+}
+
 function analyticsSummaryStrip(stats, roundName) {
   const summary = stats?.summary || {};
   const firstCount = roundName === '复赛' ? (summary.problemCount || 0) : (summary.questionCount || 0);
   const firstLabel = roundName === '复赛' ? '复赛题目' : '初赛小题';
   const secondLabel = roundName === '复赛' ? '年份数量' : '试卷数量';
+  const totalLabel = roundName === '复赛' ? '统计题量' : '统计分值';
   return `<div class="analytics-summary-strip">
     <div><b>${esc(firstCount)}</b><span>${firstLabel}</span></div>
     <div><b>${esc(summary.paperCount || 0)}</b><span>${secondLabel}</span></div>
     <div><b>${esc(summary.examPointCount || 0)}</b><span>考点数量</span></div>
-    <div><b>${esc(analyticsScore(summary.totalScore || 0))}</b><span>统计分值</span></div>
+    <div><b>${esc(roundName === '复赛' ? (summary.totalCount || summary.problemCount || 0) : analyticsScore(summary.totalScore || 0))}</b><span>${totalLabel}</span></div>
   </div>`;
 }
 
@@ -1920,7 +1948,7 @@ async function renderAnalytics() {
   const params = new URLSearchParams(location.search);
   const selectedYears = analyticsSelectedYears(params);
   const selectedGroup = params.get('groupName') || params.get('group') || '';
-  const selectedRound = params.get('roundName') || params.get('round') || '初赛';
+  const selectedRound = params.get('roundName') || params.get('round') || '';
   const optionQuery = new URLSearchParams();
   if (selectedGroup) optionQuery.set('groupName', selectedGroup);
   if (selectedRound) optionQuery.set('roundName', selectedRound);
@@ -1940,17 +1968,20 @@ async function renderAnalytics() {
         <div class="filter-actions"><button class="primary">分析</button><button type="button" class="reset-btn" data-route="/analytics">重置</button></div>
       </form>
     </div>
-    ${stats ? `${analyticsSummaryStrip(stats, selectedRound)}<div class="analytics-grid-main equal">
+    ${stats ? `${analyticsSummaryStrip(stats, selectedRound)}${selectedRound === '复赛' ? `<div class="analytics-grid-main equal">
       <section class="card analytics-chart-card analytics-count-card"><div class="table-headline"><h2>考点出现次数</h2></div>${analyticsCountBarChart(stats.counts || [])}</section>
-      <section class="card analytics-chart-card analytics-donut-card"><div class="table-headline"><h2>考点加权分值</h2></div>${analyticsDonutChart(stats.items || [])}</section>
-    </div>
-    ${selectedRound === '复赛' ? `<div class="analytics-grid-main equal">
-      <section class="card analytics-chart-card"><div class="table-headline"><h2>T1-T4 题位画像</h2></div>${analyticsFinalTaskCards(stats)}</section>
       <section class="card analytics-chart-card"><div class="table-headline"><h2>难度标签分布</h2></div>${analyticsDifficultyChart(stats.difficultyItems || [])}</section>
     </div>
-    <section class="card analytics-chart-card"><div class="table-headline"><h2>题位/考点热力表</h2></div>${analyticsTaskHeatmap(stats)}</section>
+    <div class="analytics-grid-main equal">
+      <section class="card analytics-chart-card"><div class="table-headline"><h2>T1-T4 题位画像</h2></div>${analyticsFinalTaskCards(stats)}</section>
+      <section class="card analytics-chart-card"><div class="table-headline"><h2>题位/考点热力表</h2></div>${analyticsTaskHeatmap(stats)}</section>
+    </div>
     <section class="card analytics-chart-card"><div class="table-headline"><h2>复赛题目明细</h2></div>${analyticsFinalProblemTable(stats)}</section>` : ''}
-    <section class="card analytics-chart-card"><div class="table-headline"><h2>考点/年份对照表</h2></div>${analyticsYearCompare(stats)}</section>` : ''}
+    ${selectedRound === '复赛' ? '' : `<div class="analytics-grid-main equal">
+      <section class="card analytics-chart-card analytics-count-card"><div class="table-headline"><h2>考点出现次数</h2></div>${analyticsCountBarChart(stats.counts || [])}</section>
+      <section class="card analytics-chart-card analytics-donut-card"><div class="table-headline"><h2>考点加权分值</h2></div>${analyticsDonutChart(stats.items || [])}</section>
+    </div>`}
+    <section class="card analytics-chart-card"><div class="table-headline"><h2>考点/年份对照表</h2></div>${selectedRound === '复赛' ? analyticsFinalYearCompare(stats) : analyticsYearCompare(stats)}</section>` : ''}
   </div>`;
   bindAnalyticsYearDropdown();
   bindAnalyticsDonutTooltip();
@@ -2311,6 +2342,11 @@ function tagSearchText(tag) {
 }
 function renderProblemTagSelector(allTags = [], selectedTags = []) {
   const selected = selectedTagValues(selectedTags);
+  const tagLabelMap = new Map((allTags || []).map((tag) => [tag.slug || tag.value, tagLabel(tag) || tag.slug || tag.value]));
+  const selectedChips = [...selected].map((value) => {
+    const label = tagLabelMap.get(value) || value;
+    return `<button type="button" class="tag-selected-chip" data-remove-tag="${attrEsc(value)}">${esc(label)}<span>×</span></button>`;
+  }).join('');
   const items = (allTags || [])
     .filter((tag) => tag.scope !== 'prelim' && tag.level !== 'domain')
     .map((tag) => {
@@ -2319,17 +2355,40 @@ function renderProblemTagSelector(allTags = [], selectedTags = []) {
       const search = tagSearchText(tag);
       const sub = [tag.nameEn, value].filter(Boolean).join(' / ');
       return `<label class="tag-check-option" data-tag-search="${esc(search)}">
-        <input type="checkbox" name="tags" value="${esc(value)}" ${selected.has(value) ? 'checked' : ''} />
+        <input type="checkbox" name="tags" value="${esc(value)}" data-tag-label="${attrEsc(label)}" ${selected.has(value) ? 'checked' : ''} />
         <span class="tag-check-main">${esc(label)}</span>
         ${sub ? `<span class="tag-check-sub">${esc(sub)}</span>` : ''}
       </label>`;
     }).join('');
   return `<div class="form-block tag-picker-block">
     <label class="editor-field-label">标签</label>
+    <div class="tag-selected-box">
+      <div class="tag-selected-title">已选标签</div>
+      <div class="tag-selected-list" aria-live="polite">${selectedChips || '<span class="muted small">暂未选择标签</span>'}</div>
+    </div>
     <input type="search" class="tag-search-input" placeholder="搜索标签，支持中文 / English / slug" aria-label="搜索标签" />
     <div class="tag-check-list" role="group" aria-label="标签选择">${items || '<p class="muted small">暂无可选标签</p>'}</div>
     <p class="muted small">勾选一个或多个标签。系统保存 slug，页面统一展示对应名称。</p>
   </div>`;
+}
+
+function updateSelectedTagBox(block) {
+  const list = qs('.tag-selected-list', block);
+  if (!list) return;
+  const checked = qsa('input[name="tags"][type="checkbox"]:checked', block);
+  list.innerHTML = checked.length
+    ? checked.map((input) => `<button type="button" class="tag-selected-chip" data-remove-tag="${attrEsc(input.value)}">${esc(decodeAttrValue(input.dataset.tagLabel || input.value))}<span>×</span></button>`).join('')
+    : '<span class="muted small">暂未选择标签</span>';
+  qsa('[data-remove-tag]', list).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const value = decodeAttrValue(btn.dataset.removeTag || '');
+      const input = qs(`input[name="tags"][value="${cssEscape(value)}"]`, block);
+      if (input) {
+        input.checked = false;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+  });
 }
 
 function bindTagPickers(root = document) {
@@ -2353,7 +2412,11 @@ function bindTagPickers(root = document) {
       empty.classList.toggle('hidden', visible > 0);
     };
     input.addEventListener('input', apply);
+    qsa('input[name="tags"][type="checkbox"]', block).forEach((checkbox) => {
+      checkbox.addEventListener('change', () => updateSelectedTagBox(block));
+    });
     apply();
+    updateSelectedTagBox(block);
   });
 }
 
@@ -2422,7 +2485,7 @@ async function renderProblemEditor(id) {
       <form id="problemForm" class="editor-layout-form">
         <section class="editor-panel">
           <div class="grid three">
-            <div>${requiredLabel('题号')}<input ${isNew ? 'name="id"' : ''} value="${esc(p.id)}" ${isNew ? '' : 'disabled'} placeholder="如 P1001、CSP1001" />${!isNew ? `<input type="hidden" name="id" value="${esc(p.id)}" />` : ''}</div>
+            <div>${requiredLabel('题号')}<input name="id" value="${esc(p.id)}" placeholder="如 P1001、CSPJ25T1" /></div>
             <div>${requiredLabel('标题')}<input name="title" value="${esc(p.title)}" placeholder="请输入标题" maxlength="80" /></div>
             <div>${requiredLabel('难度')}<select name="difficulty">${difficultyOptions(p.difficulty)}</select></div>
           </div>
@@ -2459,14 +2522,14 @@ async function saveProblemEditor(e, existingProblem, isNew) {
     const body = collectProblemForm(form, existingProblem.id);
     if (!validateProblemIdForUI(body.id)) return;
     const method = isNew ? 'POST' : 'PUT';
-    const url = isNew ? '/api/problems' : problemApi(body.id);
+    const url = isNew ? '/api/problems' : problemApi(existingProblem.id);
     const result = await api(url, { method, body });
     const problemId = result.problem.id;
     if (isNew) {
       nav(`/admin/problem/${problemUrl(problemId)}/data`);
     } else {
       showInlineSuccess('#editorMsg', '保存成功');
-      setTimeout(() => nav('/admin/problems'), 350);
+      setTimeout(() => nav(`/admin/problem/${problemUrl(problemId)}/edit`), 350);
     }
   } catch (err) {
     showInlineError('#editorMsg', err);
@@ -2649,15 +2712,15 @@ async function render() {
     if (path === '/admin/prelim') return await renderPrelimAdmin();
     if (path === '/admin/prelim/import') return await renderPrelimImport();
     let m;
-    if ((m = path.match(/^\/problem\/([A-Z]+\d+)$/))) return await renderProblem(m[1]);
+    if ((m = path.match(new RegExp(`^/problem/${PROBLEM_ROUTE_PATTERN}$`)))) return await renderProblem(m[1]);
     if ((m = path.match(/^\/prelim\/item\/(\d+)$/))) return await renderPrelimItem(m[1]);
     if ((m = path.match(/^\/prelim\/paper\/(\d+)$/))) return await renderPrelimPaper(m[1]);
     if ((m = path.match(/^\/prelim\/mock\/exam\/(\d+)$/))) return await renderMockExam(m[1]);
     if ((m = path.match(/^\/prelim\/mock\/report\/(\d+)$/))) return await renderMockReport(m[1]);
     if ((m = path.match(/^\/submission\/(\d+)$/))) return await renderSubmission(m[1]);
-    if ((m = path.match(/^\/admin\/problem\/(new|[A-Z]+\d+)$/))) return await renderProblemEditor(m[1]);
-    if ((m = path.match(/^\/admin\/problem\/([A-Z]+\d+)\/edit$/))) return await renderProblemEditor(m[1]);
-    if ((m = path.match(/^\/admin\/problem\/([A-Z]+\d+)\/data$/))) return await renderCaseManager(m[1]);
+    if ((m = path.match(new RegExp(`^/admin/problem/(new|[A-Z]+\\d+(?:T\\d+)?)$`)))) return await renderProblemEditor(m[1]);
+    if ((m = path.match(new RegExp(`^/admin/problem/${PROBLEM_ROUTE_PATTERN}/edit$`)))) return await renderProblemEditor(m[1]);
+    if ((m = path.match(new RegExp(`^/admin/problem/${PROBLEM_ROUTE_PATTERN}/data$`)))) return await renderCaseManager(m[1]);
     app.innerHTML = `<div class="card"><h1>页面不存在</h1><button onclick="nav('/problems')">返回题库</button></div>`;
   } catch (err) {
     renderError(err);

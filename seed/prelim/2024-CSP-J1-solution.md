@@ -4,7 +4,7 @@
 
 ## 1. 答案：C
 
-**考点与权重：** language-basics: 70%, mathematics: 30%
+**考点与权重：** data-type: 70%, signed-integer: 30%
 
 **详细解析：**
 
@@ -14,7 +14,7 @@
 
 ## 2. 答案：A
 
-**考点与权重：** base-conversion: 70%, mathematics: 30%
+**考点与权重：** base-conversion: 80%, arithmetic-operation: 20%
 
 **详细解析：**
 
@@ -24,7 +24,7 @@ $14_8=12$，$1010_2=10$，$D_{16}=13$，$1101_2=13$。所以 $(12-10)\times13-13
 
 ## 3. 答案：B
 
-**考点与权重：** permutation-combination: 75%, combinatorics: 25%
+**考点与权重：** permutation-combination: 80%, counting-principle: 20%
 
 **详细解析：**
 
@@ -34,7 +34,7 @@ $14_8=12$，$1010_2=10$，$D_{16}=13$，$1101_2=13$。所以 $(12-10)\times13-13
 
 ## 4. 答案：D
 
-**考点与权重：** base-conversion: 80%, simulation: 20%
+**考点与权重：** gray-code: 80%, binary-representation: 20%
 
 **详细解析：**
 
@@ -44,7 +44,7 @@ $14_8=12$，$1010_2=10$，$D_{16}=13$，$1101_2=13$。所以 $(12-10)\times13-13
 
 ## 5. 答案：D
 
-**考点与权重：** language-basics: 70%, mathematics: 30%
+**考点与权重：** bit-byte: 80%, arithmetic-operation: 20%
 
 **详细解析：**
 
@@ -54,7 +54,7 @@ $1\text{MB}=1024\text{KB}=1024\times1024$ 字节，1 字节等于 8 bit，因此
 
 ## 6. 答案：C
 
-**考点与权重：** language-basics: 70%, struct-basic: 30%
+**考点与权重：** data-type: 80%, struct-basic: 20%
 
 **详细解析：**
 
@@ -64,7 +64,7 @@ $1\text{MB}=1024\text{KB}=1024\times1024$ 字节，1 字节等于 8 bit，因此
 
 ## 7. 答案：D
 
-**考点与权重：** loop-structure: 80%, sequence-structure: 20%
+**考点与权重：** loop-structure: 80%, language-basics: 20%
 
 **详细解析：**
 
@@ -74,7 +74,7 @@ C++ 中常见循环语句有 `for`、`while`、`do-while`，没有 `repeat-until
 
 ## 8. 答案：B
 
-**考点与权重：** string-basic: 70%, mathematics: 17%, language-basics: 13%
+**考点与权重：** character-encoding: 70%, conditional-branch: 30%
 
 **详细解析：**
 
@@ -84,7 +84,7 @@ C++ 中常见循环语句有 `for`、`while`、`do-while`，没有 `repeat-until
 
 ## 9. 答案：B
 
-**考点与权重：** binary-search: 75%, mathematics: 25%
+**考点与权重：** binary-search: 80%, loop-tracing: 20%
 
 **详细解析：**
 
@@ -94,7 +94,7 @@ C++ 中常见循环语句有 `for`、`while`、`do-while`，没有 `repeat-until
 
 ## 10. 答案：A
 
-**考点与权重：** language-basics: 100%
+**考点与权重：** language-basics: 70%, computer-basic: 30%
 
 **详细解析：**
 
@@ -104,7 +104,7 @@ Linux、Windows、macOS 都是操作系统；Notepad 是记事本应用程序，
 
 ## 11. 答案：B
 
-**考点与权重：** graph-theory: 80%, combinatorics: 20%
+**考点与权重：** graph-degree: 80%, graph-edge-count: 20%
 
 **详细解析：**
 
@@ -114,7 +114,7 @@ Linux、Windows、macOS 都是操作系统；Notepad 是记事本应用程序，
 
 ## 12. 答案：A
 
-**考点与权重：** tree-data-structures: 70%, tree-traversal: 30%
+**考点与权重：** binary-tree: 70%, tree-traversal: 30%
 
 **详细解析：**
 
@@ -124,7 +124,7 @@ Linux、Windows、macOS 都是操作系统；Notepad 是记事本应用程序，
 
 ## 13. 答案：D
 
-**考点与权重：** stack: 75%, simulation: 25%
+**考点与权重：** stack: 80%, code-tracing: 20%
 
 **详细解析：**
 
@@ -134,7 +134,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 14. 答案：A
 
-**考点与权重：** permutation-combination: 75%, combinatorics: 25%
+**考点与权重：** permutation-combination: 80%, counting-principle: 20%
 
 **详细解析：**
 
@@ -144,7 +144,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 15. 答案：B
 
-**考点与权重：** language-basics: 100%
+**考点与权重：** compiler: 80%, computer-basic: 20%
 
 **详细解析：**
 
@@ -156,7 +156,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 16. 答案：√
 
-**考点与权重：** primality-test: 70%, loop-structure: 16%, function-recursion-basic: 14%
+**考点与权重：** primality-test: 70%, number-theory: 30%
 
 **详细解析：**
 
@@ -166,7 +166,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 17. 答案：×
 
-**考点与权重：** primality-test: 70%, loop-structure: 20%, function-recursion-basic: 10%
+**考点与权重：** primality-test: 70%, number-theory: 30%
 
 **详细解析：**
 
@@ -176,7 +176,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 18. 答案：√
 
-**考点与权重：** function-recursion-basic: 70%, primality-test: 17%, loop-structure: 13%
+**考点与权重：** primality-test: 70%, number-theory: 30%
 
 **详细解析：**
 
@@ -186,7 +186,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 19. 答案：B
 
-**考点与权重：** primality-test: 70%, simulation: 16%, mathematics: 14%
+**考点与权重：** primality-test: 70%, number-theory: 30%
 
 **详细解析：**
 
@@ -196,7 +196,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 20. 答案：A
 
-**考点与权重：** primality-test: 70%, loop-structure: 18%, conditional-branch: 12%
+**考点与权重：** primality-test: 70%, number-theory: 30%
 
 **详细解析：**
 
@@ -216,7 +216,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 22. 答案：×
 
-**考点与权重：** array-basic: 70%, dynamic-programming: 19%, stl: 11%
+**考点与权重：** array-indexing: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -236,7 +236,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 24. 答案：A
 
-**考点与权重：** dynamic-programming: 70%, array-basic: 17%, simulation: 13%
+**考点与权重：** recurrence-sequence: 80%, arithmetic-operation: 20%
 
 **详细解析：**
 
@@ -256,7 +256,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 26. 答案：A
 
-**考点与权重：** dynamic-programming: 70%, array-basic: 20%, simulation: 10%
+**考点与权重：** recurrence-sequence: 80%, arithmetic-operation: 20%
 
 **详细解析：**
 
@@ -276,7 +276,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 28. 答案：√
 
-**考点与权重：** recursion: 70%, conditional-branch: 20%, function-recursion-basic: 10%
+**考点与权重：** recursive-tracing: 70%, recursion: 30%
 
 **详细解析：**
 
@@ -286,7 +286,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 29. 答案：√
 
-**考点与权重：** recursion: 70%, basic-algorithms: 19%, function-recursion-basic: 11%
+**考点与权重：** recursion: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -296,7 +296,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 30. 答案：B
 
-**考点与权重：** recursion: 70%, function-recursion-basic: 17%, mathematics: 13%
+**考点与权重：** recursion: 70%, function-recursion-basic: 17%, arithmetic-operation: 13%
 
 **详细解析：**
 
@@ -306,7 +306,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 31. 答案：C
 
-**考点与权重：** recursion: 70%, function-recursion-basic: 14%, stl: 11%, mathematics: 5%
+**考点与权重：** recursion: 70%, function-recursion-basic: 14%, stl: 11%, arithmetic-operation: 5%
 
 **详细解析：**
 
@@ -316,7 +316,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 32. 答案：D
 
-**考点与权重：** recursion: 70%, function-recursion-basic: 17%, mathematics: 13%
+**考点与权重：** recursion: 70%, function-recursion-basic: 17%, arithmetic-operation: 13%
 
 **详细解析：**
 
@@ -328,7 +328,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 33. 答案：A
 
-**考点与权重：** loop-structure: 70%, language-basics: 19%, mathematics: 11%
+**考点与权重：** perfect-square: 70%, loop-tracing: 30%
 
 **详细解析：**
 
@@ -338,7 +338,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 34. 答案：B
 
-**考点与权重：** stl: 70%, loop-structure: 16%, mathematics: 14%
+**考点与权重：** perfect-square: 70%, loop-tracing: 30%
 
 **详细解析：**
 
@@ -348,7 +348,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 35. 答案：D
 
-**考点与权重：** conditional-branch: 70%, mathematics: 30%
+**考点与权重：** condition-simulation: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -358,7 +358,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 36. 答案：C
 
-**考点与权重：** language-basics: 70%, conditional-branch: 17%, function-recursion-basic: 13%
+**考点与权重：** perfect-square: 70%, loop-tracing: 30%
 
 **详细解析：**
 
@@ -368,7 +368,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 37. 答案：D
 
-**考点与权重：** language-basics: 70%, conditional-branch: 16%, loop-structure: 14%
+**考点与权重：** perfect-square: 70%, loop-tracing: 30%
 
 **详细解析：**
 
@@ -378,7 +378,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 38. 答案：B
 
-**考点与权重：** recursion: 70%, conditional-branch: 17%, simulation: 13%
+**考点与权重：** recursion: 70%, recursive-tracing: 30%
 
 **详细解析：**
 
@@ -418,7 +418,7 @@ A 可以全部入栈后再依次出栈；B、C 也能通过合适的入栈出栈
 
 ## 42. 答案：C
 
-**考点与权重：** recursion: 70%, sequence-structure: 17%, simulation: 13%
+**考点与权重：** recursion: 70%, code-tracing: 30%
 
 **详细解析：**
 

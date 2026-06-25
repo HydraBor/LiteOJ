@@ -64,6 +64,12 @@ function normalizeRoundName(value) {
   return raw === '复赛' ? '复赛' : '初赛';
 }
 
+function selectedRoundName(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  return normalizeRoundName(raw);
+}
+
 function parseFinalProblemId(id) {
   const m = String(id || '').toUpperCase().match(/^CSP([JS])(\d{2}|\d{4})T([1-4])$/);
   if (!m) return null;
@@ -117,7 +123,7 @@ function prelimOptions(query = {}) {
     rounds: ANALYTICS_ROUNDS,
     defaultYears: [],
     defaultGroup: '',
-    defaultRound: '初赛',
+    defaultRound: '',
   };
 }
 
@@ -146,12 +152,12 @@ function finalOptions(query = {}) {
     rounds: ANALYTICS_ROUNDS,
     defaultYears: [],
     defaultGroup: '',
-    defaultRound: '初赛',
+    defaultRound: '',
   };
 }
 
 function analyticsOptions(query = {}) {
-  const roundName = normalizeRoundName(query.roundName || query.round);
+  const roundName = selectedRoundName(query.roundName || query.round);
   const options = roundName === '复赛' ? finalOptions(query) : prelimOptions(query);
   return { ...options, roundName };
 }
@@ -261,10 +267,9 @@ function buildFinalStats(query) {
     .filter((row) => !yearsFilter.length || yearsFilter.includes(row.year))
     .sort((a, b) => a.year - b.year || a.groupName.localeCompare(b.groupName) || a.taskNo - b.taskNo || a.id.localeCompare(b.id));
 
-  const tagScores = new Map();
   const tagCounts = new Map();
-  const tagYearScores = new Map();
-  const yearTotals = new Map();
+  const tagYearCounts = new Map();
+  const yearCounts = new Map();
   const difficultyCounts = new Map();
   const taskStats = new Map(FINAL_TASKS.map((task) => [task, {
     task,
@@ -274,31 +279,20 @@ function buildFinalStats(query) {
     problems: [],
   }]));
   const problems = [];
-  let totalScore = 0;
 
   for (const row of rows) {
-    const score = 100;
-    totalScore += score;
-    addContribution(yearTotals, row.year, score);
+    addCount(yearCounts, row.year, 1);
     addCount(difficultyCounts, row.difficulty || 'unrated', 1);
 
     const tags = normalizeTagEntries(row.tags_json);
     const uniqueTags = new Map(tags.map((tag) => [tag.slug || tag.name, tag]));
-    for (const tag of uniqueTags.values()) addCount(tagCounts, tag.slug || tag.name, 1);
-
-    const contributionTags = contributionTagsForQuestion(row.tags_json);
-    const rawWeightSum = contributionTags.reduce((sum, tag) => sum + (Number(tag.weight) || 0), 0);
-    const weightSum = rawWeightSum > 0 ? rawWeightSum : (contributionTags.length || 1);
-    const contributions = contributionTags.map((tag) => {
-      const ratio = rawWeightSum > 0 ? ((Number(tag.weight) || 0) / weightSum) : (1 / contributionTags.length);
-      const contribution = score * ratio;
+    for (const tag of uniqueTags.values()) {
       const key = tag.slug || tag.name;
-      addContribution(tagScores, key, contribution);
-      const yearMap = tagYearScores.get(key) || new Map();
-      addContribution(yearMap, row.year, contribution);
-      tagYearScores.set(key, yearMap);
-      return { slug: key, tag: tagLabels.get(key) || tag.name || key, score: roundScore(contribution) };
-    });
+      addCount(tagCounts, key, 1);
+      const yearMap = tagYearCounts.get(key) || new Map();
+      addCount(yearMap, row.year, 1);
+      tagYearCounts.set(key, yearMap);
+    }
 
     const task = taskStats.get(row.task);
     if (task) {
@@ -320,25 +314,22 @@ function buildFinalStats(query) {
       submitCount: row.submit_count || 0,
       acCount: row.ac_count || 0,
       tagNames: tagNamesFromList(parseJson(row.tags_json, [])),
-      contributions,
     });
   }
 
-  const years = [...yearTotals.keys()].sort((a, b) => a - b);
-  const total = totalScore || 1;
-  const items = [...tagScores.entries()]
-    .map(([slug, score]) => ({ slug, tag: tagLabels.get(slug) || slug, score: roundScore(score), percent: roundPercent(score * 100 / total) }))
-    .sort((a, b) => b.score - a.score || a.tag.localeCompare(b.tag, 'zh-Hans-CN'));
   const counts = [...tagCounts.entries()]
     .map(([slug, count]) => ({ slug, tag: tagLabels.get(slug) || slug, count }))
     .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'zh-Hans-CN'));
+  const years = [...yearCounts.keys()].sort((a, b) => a - b);
+  const totalCount = rows.length || 1;
+  const items = counts.map((item) => ({ ...item, score: item.count, percent: roundPercent(item.count * 100 / totalCount) }));
   const byYear = years.map((year) => {
-    const yearTotal = yearTotals.get(year) || 0;
-    const tags = items.map((item) => {
-      const score = tagYearScores.get(item.slug)?.get(year) || 0;
-      return { slug: item.slug, tag: item.tag, score: roundScore(score), percent: yearTotal ? roundPercent(score * 100 / yearTotal) : 0 };
-    }).filter((item) => item.score > 0);
-    return { year, totalScore: roundScore(yearTotal), tags };
+    const yearTotal = yearCounts.get(year) || 0;
+    const tags = counts.map((item) => {
+      const count = tagYearCounts.get(item.slug)?.get(year) || 0;
+      return { slug: item.slug, tag: item.tag, count, percent: yearTotal ? roundPercent(count * 100 / yearTotal) : 0 };
+    }).filter((item) => item.count > 0);
+    return { year, totalCount: yearTotal, tags };
   });
   const difficultyItems = [...difficultyCounts.entries()]
     .map(([difficulty, count]) => ({ difficulty, label: difficultyLabel(difficulty), count }))
@@ -372,7 +363,8 @@ function buildFinalStats(query) {
       paperCount: years.length,
       problemCount: rows.length,
       questionCount: rows.length,
-      totalScore: roundScore(totalScore),
+      totalScore: rows.length,
+      totalCount: rows.length,
       examPointCount: items.length,
       knowledgeCount: items.length,
       topTags: items.slice(0, 6),
@@ -385,7 +377,7 @@ function buildFinalStats(query) {
     difficultyItems,
     taskHeatmap,
     problems,
-    rule: '复赛分析以编程题题号识别年份、组别和题位，例如 CSPJ25T1 表示 2025 年 CSP-J 复赛 T1。每题按 100 分计入加权分值，知识点贡献沿用题目标签权重；T1-T4 统计分别展示各题位的知识点出现次数和难度分布。',
+    rule: '复赛分析以编程题题号识别年份、组别和题位，例如 CSPJ25T1 表示 2025 年 CSP-J 复赛 T1。复赛不计算考点权重，只统计公开复赛题目中各知识点的出现次数，并按 T1-T4 展示题位、难度和考点热力分布。',
   };
 }
 

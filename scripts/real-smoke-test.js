@@ -194,6 +194,22 @@ async function main() {
   assert.strictEqual(finalAnalytics.summary.problemCount, 1, 'final analytics should count public final-round programming problems');
   assert((finalAnalytics.byTask || []).some((item) => item.task === 'T1' && item.problemCount === 1), 'final analytics should group problems by T1-T4');
   assert((finalAnalytics.difficultyItems || []).some((item) => item.difficulty === 'popular_plus'), 'final analytics should expose difficulty distribution');
+  assert.strictEqual(finalAnalytics.rule.includes('不计算考点权重'), true, 'final analytics should not use weighted tag scoring');
+  const renamedFinal = await request('PUT', '/api/problems/CSPJ25T1', {
+    id: 'CSPJ25T2',
+    title: '复赛分析烟测题改名',
+    description: '# 复赛题\n\n用于测试 T2 分析。',
+    difficulty: 'popular_plus',
+    timeLimit: 1000,
+    memoryLimit: 128,
+    tags: ['dynamic-programming', 'array-basic'],
+    isPublic: true,
+  });
+  assert.strictEqual(renamedFinal.problem.id, 'CSPJ25T2', 'problem edit should allow changing the problem id');
+  const renamedRead = await request('GET', '/api/problems/CSPJ25T2');
+  assert.strictEqual(renamedRead.problem.title, '复赛分析烟测题改名', 'renamed problem should be readable by the new id');
+  const oldFinalRes = await fetch(`http://127.0.0.1:${port}/api/problems/CSPJ25T1`, { headers: { Cookie: cookie } });
+  assert.strictEqual(oldFinalRes.status, 404, 'old problem id should no longer exist after rename');
   const prelimItems = await request('GET', '/api/prelim/items');
   assert(prelimItems.items.length > 0, 'prelim item list should work');
   const mockPapers = await request('GET', '/api/prelim/mock/papers');
@@ -209,7 +225,7 @@ async function main() {
 
   await request('DELETE', `/api/problems/${encodeURIComponent(cloneId)}`);
   await request('DELETE', `/api/problems/${encodeURIComponent(problemId)}`);
-  await request('DELETE', '/api/problems/CSPJ25T1');
+  await request('DELETE', '/api/problems/CSPJ25T2');
   const resetUserName = `u${Date.now()}`;
   const registered = await request('POST', '/api/auth/register', { username: resetUserName, password: 'oldpass1' });
   assert.strictEqual(registered.user.role, 'user', 'new public registrant should be a normal user');

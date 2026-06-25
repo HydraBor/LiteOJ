@@ -86,7 +86,7 @@ LiteOJ 前端是无构建步骤的单页应用：
 
 `problems.tags_json` 和 `prelim_questions.tags_json` 仍保留为接口兼容缓存；查询、筛选和数据分析优先使用关系表。
 
-复赛题目无需单独建表，使用编程题库题号承载元数据：`CSPJ25T1` 表示 2025 年 CSP-J 复赛 T1，`CSPS25T4` 表示 2025 年 CSP-S 复赛 T4。复赛分析只统计公开题目。
+复赛题目无需单独建表，使用编程题库题号承载元数据：`CSPJ25T1` 表示 2025 年 CSP-J 复赛 T1，`CSPS25T4` 表示 2025 年 CSP-S 复赛 T4。复赛分析只统计公开题目，并按标签出现次数分析，不计算考点权重。
 
 题目文件位于 `DATA_DIR/problems/<problemId>/`：
 

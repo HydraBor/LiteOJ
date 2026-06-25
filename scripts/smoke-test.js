@@ -86,8 +86,8 @@ assert.strictEqual(parsedPrelim.groups.length, 20, '2025 CSP-J1 seed should pars
 assert.strictEqual(parsedPrelim.paper.totalScore, 100, 'mock exam total should follow official paper total, not rounded raw question sum');
 assert.strictEqual(parsedPrelim.questions.reduce((sum, q) => sum + q.score, 0), 100, 'seed raw score should match the official 100-point paper after score correction');
 assert.strictEqual(parsedPrelim.questions.find((q) => q.number === 16).score, 1, 'question 16 should be corrected to 1 point');
-assert.deepStrictEqual(parsedPrelim.questions.find((q) => q.number === 1).tags.map((t) => t.slug), ['base-conversion', 'language-basics'], 'question 1 tags should use fixed slug-only tags');
-assert.deepStrictEqual(parsedPrelim.questions.find((q) => q.number === 1).tags.map((t) => t.name), ['进制', '语言入门'], 'question 1 tags should display the fixed Chinese names');
+assert.deepStrictEqual(parsedPrelim.questions.find((q) => q.number === 1).tags.map((t) => t.slug), ['data-type', 'integer-representation'], 'question 1 tags should use fixed slug-only tags');
+assert.deepStrictEqual(parsedPrelim.questions.find((q) => q.number === 1).tags.map((t) => t.name), ['数据类型', '整数表示'], 'question 1 tags should display the fixed Chinese names');
 assert(!parsedPrelim.questions.some((q) => /^---$/m.test(q.explanation || '')), 'preliminary explanations should not keep Markdown horizontal-rule separators');
 assert.strictEqual(normalizeTagInput('语言入门'), null, 'Chinese tag names should not resolve in the slug-only tag system');
 assert.strictEqual(parsedPrelim.questions.find((q) => q.number === 1).answer, 'A');
@@ -130,21 +130,25 @@ assert(analyticsRoutes.includes('const tagCounts = new Map()') && analyticsRoute
 assert(analyticsRoutes.includes('contributionTagsForQuestion') && analyticsRoutes.includes('.slice(0, 2)'), 'analytics should only use the top two weighted tags for score contribution');
 assert(analyticsRoutes.includes('counts,') && analyticsRoutes.includes('items,') && analyticsRoutes.includes('byYear,'), 'analytics API should return counts, weighted scores, and year comparison data');
 assert(analyticsRoutes.includes('defaultYears: []') && analyticsRoutes.includes("defaultGroup: ''"), 'analytics options should not preselect year or group');
+assert(analyticsRoutes.includes("function selectedRoundName(value)") && analyticsRoutes.includes("defaultRound: ''"), 'analytics options should not preselect round before the user chooses a session');
 assert(analyticsRoutes.includes('examPointCount') && analyticsRoutes.includes('knowledgeCount'), 'analytics summary should expose current exam-point count while keeping compatibility');
 assert(analyticsRoutes.includes("router.get('/options'") && analyticsRoutes.includes("router.get('/knowledge'") && analyticsRoutes.includes('parseFinalProblemId'), 'analytics route should expose unified preliminary/final analysis endpoints');
 assert(analyticsRoutes.includes('FINAL_TASKS') && analyticsRoutes.includes('taskHeatmap') && analyticsRoutes.includes('difficultyItems'), 'final-round analytics should summarize T1-T4, heatmap, and difficulty data');
+assert(analyticsRoutes.includes('复赛不计算考点权重') && analyticsRoutes.includes('tagYearCounts'), 'final-round analytics should count tag occurrences instead of weighted scores');
 
 const appJs = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public', 'app.js'), 'utf8');
 const outsideUiNamePattern = new RegExp(['hy', 'dro', '|', 'ac', 'go'].join(''), 'i');
 const cssModuleNamePattern = /[A-Za-z]+_[A-Za-z0-9]+__/;
 
 assert(appJs.includes('analyticsYearDropdown') && appJs.includes('analyticsGroupSelect') && appJs.includes('analyticsRoundSelect'), 'frontend analytics should use compact group/round/year filters');
+assert(appJs.includes('请选择场次') && appJs.includes("const selectedRound = params.get('roundName') || params.get('round') || ''"), 'analytics round filter should start with an empty placeholder');
 assert(appJs.includes('compact-analytics-filter') && appJs.includes('filter-panel-grid') && !appJs.includes('analytics-filter-field') && !appJs.includes('page-head analytics-head'), 'analytics filter should follow the shared filter panel grid instead of custom field wrappers or page head');
 assert(!appJs.includes('按年份和组别统计初赛题库中的知识点出现次数与加权分值贡献。') && !appJs.includes("routeLink('/prelim', '返回初赛题库'") && !appJs.includes('<h1>数据分析</h1>'), 'analytics page should remove redundant title, explanatory text, and return link');
 assert(appJs.includes('考点出现次数') && appJs.includes('考点加权分值') && appJs.includes('考点/年份对照表') && !appJs.includes('知识点出现次数') && !appJs.includes('知识点加权分值') && !appJs.includes('知识点/年份对照表'), 'analytics page should use 考点 wording');
 assert(!appJs.includes('<h1>后台管理</h1>') && !appJs.includes('<h1>个人主页</h1>') && !appJs.includes('查看账号信息并修改登录密码。') && !appJs.includes('密码会使用 bcrypt 单向哈希存储'), 'admin/profile pages should not render removed headings or password storage hint');
 assert(appJs.includes('analyticsCountBarChart') && appJs.includes('analyticsDonutChart') && appJs.includes('analyticsYearCompare'), 'frontend analytics should render count bar chart, weighted donut chart, and year comparison table');
 assert(appJs.includes('analyticsFinalTaskCards') && appJs.includes('analyticsTaskHeatmap') && appJs.includes('analyticsDifficultyChart'), 'frontend analytics should render final-round T1-T4, heatmap, and difficulty charts');
+assert(appJs.includes('analyticsFinalYearCompare') && appJs.includes("selectedRound === '复赛' ? analyticsFinalYearCompare"), 'frontend final-round analytics should compare yearly tag counts');
 assert(!appJs.includes("tag: '其他'") && !appJs.includes("tag: \"其他\""), 'analytics weighted donut should expand all exam points instead of merging them into 其他');
 assert(!appJs.includes('/api/analytics/prelim/cutoffs') && !appJs.includes('name="province"'), 'frontend analytics should not load cutoff lines or render province filters in the simplified version');
 assert(!outsideUiNamePattern.test(appJs) && !cssModuleNamePattern.test(appJs), 'frontend templates should use LiteOJ-owned semantic class names');
@@ -162,6 +166,7 @@ assert(appJs.includes('label class="mock-keyword">关键词'), 'mock filter keyw
 
 assert(/function\s+attrEsc\s*\(/.test(appJs), 'Markdown editor toolbar should define attrEsc before renderProblemEditor uses it');
 assert(appJs.includes('encodeURIComponent(String(value ??') && appJs.includes('decodeURIComponent(value ||'), 'Markdown toolbar insertion values should be safely encoded/decoded for data attributes');
+assert(appJs.includes('esc(decodeAttrValue(input.dataset.tagLabel || input.value))'), 'selected problem tag chips should decode stored Chinese labels before display');
 assert(!appJs.includes('href="javascript:nav('), 'SPA routes should not use fragile javascript:nav hrefs');
 
 assert(!appJs.includes('进入最新试卷'), 'prelim list should not show latest paper shortcut');
@@ -292,6 +297,7 @@ assert(appJs.includes('isMarkdownTableAlignRow') && appJs.includes('rowspan=') &
 assert(appJs.includes('normalizeBrokenMarkdownLinks') && appJs.includes('cuteTableWrapperClass') && appJs.includes('md-align'), 'Markdown renderer should support split image links plus :::align and ::cute-table directives');
 assert(appJs.includes('data-md-attachment') && appJs.includes('insertAttachmentIntoEditor'), 'Markdown toolbar should upload non-image attachments and insert links');
 assert(appJs.includes('tag-search-input') && appJs.includes('tag-check-option') && appJs.includes('data-tag-search') && appJs.includes('type="checkbox" name="tags"'), 'problem editor should use searchable checkbox tag selection');
+assert(appJs.includes('tag-selected-box') && appJs.includes('updateSelectedTagBox') && appJs.includes('data-remove-tag'), 'problem editor should show and maintain selected tag chips');
 assert(!appJs.includes(' · ${esc(meta)}'), 'problem tag selector should not show level suffixes such as · topic');
 const styleCss = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public', 'style.css'), 'utf8');
 assert(styleCss.includes('.table-action-row'), 'management table buttons should use an inner flex row so td borders stay aligned');
@@ -327,10 +333,11 @@ for (const text of [
 assert(!appJs.includes('onclick="event.preventDefault(); nav(this.dataset.route)'), 'routeLink must not rely on inline onclick handlers');
 assert(!appJs.includes('href="javascript:nav('), 'SPA links must not use fragile javascript: href routes');
 assert(!appJs.includes('onclick="deleteCase('), 'case delete must not use duplicated inline onclick handlers');
-assert(appJs.includes('path.match(/^\\/admin\\/problem\\/(new|[A-Z]+\\d+)$/)') && appJs.includes('return await renderProblemEditor(m[1]);') || appJs.includes('return renderProblemEditor(m[1]);'), 'new-problem route should dispatch to renderProblemEditor');
-assert(appJs.includes('path.match(/^\\/admin\\/problem\\/([A-Z]+\\d+)\\/edit$/)') && appJs.includes('return await renderProblemEditor(m[1]);') || appJs.includes('return renderProblemEditor(m[1]);'), 'edit route should dispatch to renderProblemEditor');
-assert(appJs.includes('path.match(/^\\/admin\\/problem\\/([A-Z]+\\d+)\\/data$/)') && appJs.includes('return await renderCaseManager(m[1]);') || appJs.includes('return renderCaseManager(m[1]);'), 'testdata route should dispatch to renderCaseManager');
-assert(appJs.includes('async function saveProblemEditor') && appJs.includes("const method = isNew ? 'POST' : 'PUT'") && appJs.includes("const url = isNew ? '/api/problems' : problemApi(body.id)"), 'problem editor save should distinguish create/update');
+assert(appJs.includes('PROBLEM_ROUTE_PATTERN') && appJs.includes('(?:T\\\\d+)?'), 'frontend problem routes should accept CSPJ25T1-style ids');
+assert(appJs.includes('return await renderProblemEditor(m[1]);') || appJs.includes('return renderProblemEditor(m[1]);'), 'new-problem route should dispatch to renderProblemEditor');
+assert(appJs.includes('return await renderCaseManager(m[1]);') || appJs.includes('return renderCaseManager(m[1]);'), 'testdata route should dispatch to renderCaseManager');
+assert(appJs.includes("const url = isNew ? '/api/problems' : problemApi(existingProblem.id)"), 'problem editor should PUT updates to the original id so the id itself can change');
+assert(appJs.includes('async function saveProblemEditor') && appJs.includes("const method = isNew ? 'POST' : 'PUT'") && appJs.includes("const url = isNew ? '/api/problems' : problemApi(existingProblem.id)"), 'problem editor save should distinguish create/update and allow id changes');
 
 const dbJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'db.js'), 'utf8');
 for (const col of [

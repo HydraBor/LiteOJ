@@ -4,7 +4,7 @@
 
 ## 1. 答案：C
 
-**考点与权重：** language-basics: 100%
+**考点与权重：** domain-name: 80%, computer-basic: 20%
 
 **详细解析：**
 
@@ -14,7 +14,7 @@
 
 ## 2. 答案：C
 
-**考点与权重：** bitwise: 70%, base-conversion: 30%
+**考点与权重：** bitwise: 80%, binary-representation: 20%
 
 **详细解析：**
 
@@ -24,7 +24,7 @@
 
 ## 3. 答案：B
 
-**考点与权重：** language-basics: 100%
+**考点与权重：** bit-byte: 70%, data-type: 30%
 
 **详细解析：**
 
@@ -34,7 +34,7 @@
 
 ## 4. 答案：A
 
-**考点与权重：** loop-structure: 70%, sequence-structure: 19%, simulation: 11%
+**考点与权重：** loop-tracing: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -44,7 +44,7 @@
 
 ## 5. 答案：D
 
-**考点与权重：** binary-search: 80%, basic-algorithms: 20%
+**考点与权重：** binary-search: 80%, loop-tracing: 20%
 
 **详细解析：**
 
@@ -64,7 +64,7 @@
 
 ## 7. 答案：B
 
-**考点与权重：** combinatorics: 70%, enumeration: 30%
+**考点与权重：** counting-principle: 70%, enumeration: 30%
 
 **详细解析：**
 
@@ -74,7 +74,7 @@
 
 ## 8. 答案：A
 
-**考点与权重：** tree-data-structures: 70%, array-basic: 22%, simulation: 8%
+**考点与权重：** binary-tree: 70%, array-basic: 22%, simulation: 8%
 
 **详细解析：**
 
@@ -84,7 +84,7 @@
 
 ## 9. 答案：D
 
-**考点与权重：** mathematics: 70%, enumeration: 30%
+**考点与权重：** primality-test: 70%, number-theory: 30%
 
 **详细解析：**
 
@@ -94,7 +94,7 @@
 
 ## 10. 答案：A
 
-**考点与权重：** gcd: 70%, mathematics: 30%
+**考点与权重：** gcd: 70%, number-theory: 30%
 
 **详细解析：**
 
@@ -104,7 +104,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 11. 答案：B
 
-**考点与权重：** enumeration: 70%, greedy: 18%, mathematics: 12%
+**考点与权重：** enumeration: 70%, greedy: 18%, arithmetic-operation: 12%
 
 **详细解析：**
 
@@ -114,7 +114,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 12. 答案：A
 
-**考点与权重：** pigeonhole-principle: 70%, combinatorics: 30%
+**考点与权重：** pigeonhole-principle: 70%, counting-principle: 30%
 
 **详细解析：**
 
@@ -124,7 +124,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 13. 答案：D
 
-**考点与权重：** combinatorics: 70%, string-basic: 17%, enumeration: 13%
+**考点与权重：** counting-principle: 70%, string-basic: 17%, enumeration: 13%
 
 **详细解析：**
 
@@ -134,7 +134,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 14. 答案：D
 
-**考点与权重：** tree-data-structures: 80%, recursion: 20%
+**考点与权重：** recursion: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -144,7 +144,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 15. 答案：C
 
-**考点与权重：** language-basics: 100%
+**考点与权重：** computer-basic: 100%
 
 **详细解析：**
 
@@ -156,7 +156,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 16. 答案：×
 
-**考点与权重：** string-basic: 70%, language-basics: 19%, conditional-branch: 11%
+**考点与权重：** character-encoding: 70%, conditional-branch: 30%
 
 **详细解析：**
 
@@ -166,7 +166,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 17. 答案：√
 
-**考点与权重：** loop-structure: 70%, number-theory: 19%, conditional-branch: 11%
+**考点与权重：** modulo-operation: 70%, arithmetic-operation: 30%
 
 **详细解析：**
 
@@ -176,7 +176,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 18. 答案：×
 
-**考点与权重：** loop-structure: 70%, mathematics: 19%, string-basic: 11%
+**考点与权重：** perfect-square: 70%, loop-tracing: 30%
 
 **详细解析：**
 
@@ -186,7 +186,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 19. 答案：√
 
-**考点与权重：** string-basic: 80%, conditional-branch: 20%
+**考点与权重：** character-encoding: 70%, conditional-branch: 30%
 
 **详细解析：**
 
@@ -196,7 +196,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 20. 答案：C
 
-**考点与权重：** mathematics: 70%, string-basic: 19%, enumeration: 11%
+**考点与权重：** arithmetic-operation: 70%, counting-principle: 30%
 
 **详细解析：**
 
@@ -206,7 +206,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 21. 答案：D
 
-**考点与权重：** mathematics: 70%, string-basic: 19%, enumeration: 11%
+**考点与权重：** factor-counting: 70%, prime-factorization: 30%
 
 **详细解析：**
 
@@ -216,7 +216,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 22. 答案：√
 
-**考点与权重：** array-basic: 70%, simulation: 19%, conditional-branch: 11%
+**考点与权重：** array-indexing: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -226,7 +226,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 23. 答案：×
 
-**考点与权重：** simulation: 70%, array-basic: 19%, conditional-branch: 11%
+**考点与权重：** increment-decrement: 70%, state-update: 30%
 
 **详细解析：**
 
@@ -236,7 +236,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 24. 答案：×
 
-**考点与权重：** array-basic: 70%, simulation: 20%, conditional-branch: 10%
+**考点与权重：** array-indexing: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -246,7 +246,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 25. 答案：×
 
-**考点与权重：** conditional-branch: 70%, array-basic: 19%, simulation: 11%
+**考点与权重：** condition-simulation: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -256,7 +256,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 26. 答案：C
 
-**考点与权重：** array-basic: 70%, combinatorics: 19%, simulation: 11%
+**考点与权重：** array-basic: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -266,7 +266,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 27. 答案：A
 
-**考点与权重：** array-basic: 70%, simulation: 19%, combinatorics: 11%
+**考点与权重：** array-basic: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -286,7 +286,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 29. 答案：√
 
-**考点与权重：** recursion: 70%, array-basic: 19%, sequence-structure: 11%
+**考点与权重：** recursion: 70%, array-basic: 19%, expression-evaluation: 11%
 
 **详细解析：**
 
@@ -296,7 +296,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 30. 答案：C
 
-**考点与权重：** recursion: 70%, basic-algorithms: 19%, array-basic: 11%
+**考点与权重：** recursion: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -316,7 +316,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 32. 答案：A
 
-**考点与权重：** recursion: 70%, greedy: 16%, mathematics: 14%
+**考点与权重：** recursion: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -326,7 +326,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 33. 答案：D
 
-**考点与权重：** recursion: 70%, tree-data-structures: 19%, mathematics: 11%
+**考点与权重：** recursion: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -338,7 +338,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 34. 答案：C
 
-**考点与权重：** recursion: 70%, array-basic: 18%, language-basics: 12%
+**考点与权重：** recursion: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -378,7 +378,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 38. 答案：B
 
-**考点与权重：** bitwise: 70%, mathematics: 19%, array-basic: 11%
+**考点与权重：** bitwise: 70%, arithmetic-operation: 19%, array-basic: 11%
 
 **详细解析：**
 
@@ -388,7 +388,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 39. 答案：D
 
-**考点与权重：** sorting: 70%, array-basic: 30%
+**考点与权重：** counting-sort: 70%, array-indexing: 30%
 
 **详细解析：**
 
@@ -398,7 +398,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 40. 答案：C
 
-**考点与权重：** sorting: 70%, array-basic: 30%
+**考点与权重：** counting-sort: 70%, array-indexing: 30%
 
 **详细解析：**
 
@@ -408,7 +408,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 41. 答案：B
 
-**考点与权重：** sorting: 70%, array-basic: 30%
+**考点与权重：** counting-sort: 70%, array-indexing: 30%
 
 **详细解析：**
 
@@ -418,7 +418,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 42. 答案：A
 
-**考点与权重：** sorting: 70%, array-basic: 30%
+**考点与权重：** counting-sort: 70%, array-indexing: 30%
 
 **详细解析：**
 
@@ -428,7 +428,7 @@ $319=11\times29$，$377=13\times29$，所以二者的最大公约数为 29。
 
 ## 43. 答案：B
 
-**考点与权重：** array-basic: 70%, sorting: 22%, language-basics: 8%
+**考点与权重：** array-indexing: 70%, code-tracing: 30%
 
 **详细解析：**
 

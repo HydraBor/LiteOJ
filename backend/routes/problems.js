@@ -147,6 +147,29 @@ function clearProblemCases(problemId) {
   for (const name of fs.readdirSync(dir)) fs.rmSync(path.join(dir, name), { force: true, recursive: true });
 }
 
+function rewriteProblemRelativePath(value, fromId, toId) {
+  return String(value || '').split(`problems/${fromId}/`).join(`problems/${toId}/`);
+}
+
+function rewriteProblemAttachmentUrls(value, fromId, toId) {
+  const fromPrefix = `/api/problems/${encodeURIComponent(fromId)}/attachments/`;
+  const toPrefix = `/api/problems/${encodeURIComponent(toId)}/attachments/`;
+  return String(value || '').split(fromPrefix).join(toPrefix);
+}
+
+function moveProblemDirectory(fromId, toId) {
+  if (fromId === toId) return () => {};
+  const from = problemRoot(fromId);
+  const to = problemRoot(toId);
+  if (!fs.existsSync(from)) return () => {};
+  if (fs.existsSync(to)) throw Object.assign(new Error(`题号 ${toId} 的数据目录已存在，请先清理后再改题号`), { status: 409 });
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  fs.renameSync(from, to);
+  return () => {
+    if (fs.existsSync(to) && !fs.existsSync(from)) fs.renameSync(to, from);
+  };
+}
+
 function caseScore(value) {
   const n = Number(value);
   return Number.isFinite(n) ? Math.max(0, n) : 0;
@@ -387,29 +410,75 @@ router.get('/:id', (req, res, next) => {
 });
 
 router.put('/:id', requireAdmin, (req, res, next) => {
+  let rollbackMove = null;
   try {
     const id = getParamId(req);
     const existing = db.prepare('SELECT * FROM problems WHERE id = ?').get(id);
     if (!existing) return res.status(404).json({ error: '题目不存在' });
-    const data = validateProblemBody(req.body || {}, existing);
-    db.prepare(`UPDATE problems SET
-      title = ?, description = ?, tags_json = ?, difficulty = ?, time_limit = ?, memory_limit = ?,
-      checker_mode = ?, checker_tolerance = ?, is_public = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?`).run(
-      data.title,
-      data.description,
-      JSON.stringify(data.tags),
-      data.difficulty,
-      data.timeLimit,
-      data.memoryLimit,
-      data.checkerMode,
-      data.checkerTolerance,
-      boolToInt(data.isPublic),
-      id,
-    );
-    syncProblemTags(db, id, data.tags, 'manual');
-    res.json({ problem: problemWithChecker(db.prepare('SELECT * FROM problems WHERE id = ?').get(id)) });
+    const body = req.body || {};
+    const requestedId = parseProblemCode(String(body.id ?? id).trim() || id);
+    if (!requestedId) return res.status(400).json({ error: '题号格式错误：题号必须由若干大写英文字母 + 若干数字组成，可选 T + 题位，例如 P1001、ABC12、CSPJ25T1' });
+    if (requestedId !== id && db.prepare('SELECT id FROM problems WHERE id = ?').get(requestedId)) {
+      return res.status(409).json({ error: '新题号已存在' });
+    }
+    const data = validateProblemBody(body, existing);
+    const finalDescription = requestedId === id ? data.description : rewriteProblemAttachmentUrls(data.description, id, requestedId);
+    rollbackMove = moveProblemDirectory(id, requestedId);
+    const tx = db.transaction(() => {
+      if (requestedId === id) {
+        db.prepare(`UPDATE problems SET
+          title = ?, description = ?, tags_json = ?, difficulty = ?, time_limit = ?, memory_limit = ?,
+          checker_mode = ?, checker_tolerance = ?, is_public = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?`).run(
+          data.title,
+          finalDescription,
+          JSON.stringify(data.tags),
+          data.difficulty,
+          data.timeLimit,
+          data.memoryLimit,
+          data.checkerMode,
+          data.checkerTolerance,
+          boolToInt(data.isPublic),
+          id,
+        );
+        return;
+      }
+      db.prepare(`INSERT INTO problems
+        (id, title, description, tags_json, difficulty, time_limit, memory_limit, scoring_mode, checker_mode, checker_tolerance, is_public, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(
+        requestedId,
+        data.title,
+        finalDescription,
+        JSON.stringify(data.tags),
+        data.difficulty,
+        data.timeLimit,
+        data.memoryLimit,
+        existing.scoring_mode || 'oi',
+        data.checkerMode,
+        data.checkerTolerance,
+        boolToInt(data.isPublic),
+        existing.created_by,
+        existing.created_at || new Date().toISOString(),
+      );
+      const caseRows = db.prepare('SELECT id, input_path, output_path FROM problem_cases WHERE problem_id = ?').all(id);
+      const updateCase = db.prepare('UPDATE problem_cases SET problem_id = ?, input_path = ?, output_path = ? WHERE id = ?');
+      for (const row of caseRows) {
+        updateCase.run(requestedId, rewriteProblemRelativePath(row.input_path, id, requestedId), rewriteProblemRelativePath(row.output_path, id, requestedId), row.id);
+      }
+      db.prepare('UPDATE submissions SET problem_id = ? WHERE problem_id = ?').run(requestedId, id);
+      db.prepare('UPDATE oj_problem_tags SET problem_id = ? WHERE problem_id = ?').run(requestedId, id);
+      db.prepare('DELETE FROM problems WHERE id = ?').run(id);
+    });
+    tx();
+    rollbackMove = null;
+    syncProblemTags(db, requestedId, data.tags, 'manual');
+    res.json({ problem: problemWithChecker(db.prepare('SELECT * FROM problems WHERE id = ?').get(requestedId)) });
   } catch (err) { return sendRouteError(res, err, next); }
+  finally {
+    if (rollbackMove) {
+      try { rollbackMove(); } catch (_) {}
+    }
+  }
 });
 
 function updateProblemStatus(req, res, next) {

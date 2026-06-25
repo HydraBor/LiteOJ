@@ -4,7 +4,7 @@
 
 ## 1. 答案：A
 
-**考点与权重：** language-basics: 70%, struct-basic: 22%, function-recursion-basic: 8%
+**考点与权重：** object-oriented-programming: 80%, computer-basic: 20%
 
 **详细解析：**
 
@@ -14,7 +14,7 @@
 
 ## 2. 答案：C
 
-**考点与权重：** stack: 80%, simulation: 20%
+**考点与权重：** stack: 80%, code-tracing: 20%
 
 **详细解析：**
 
@@ -24,7 +24,7 @@
 
 ## 3. 答案：D
 
-**考点与权重：** language-basics: 100%
+**考点与权重：** pointer: 80%, assignment-statement: 20%
 
 **详细解析：**
 
@@ -34,7 +34,7 @@
 
 ## 4. 答案：C
 
-**考点与权重：** linked-list: 70%, array-basic: 24%, linear-data-structures: 6%
+**考点与权重：** linked-list: 80%, linear-data-structures: 20%
 
 **详细解析：**
 
@@ -44,7 +44,7 @@
 
 ## 5. 答案：B
 
-**考点与权重：** stack: 70%, queue: 19%, simulation: 11%
+**考点与权重：** stack: 70%, queue: 20%, code-tracing: 10%
 
 **详细解析：**
 
@@ -54,7 +54,7 @@
 
 ## 6. 答案：B
 
-**考点与权重：** sequence-structure: 70%, stack: 15%, recursion: 15%
+**考点与权重：** logical-operator: 80%, expression-evaluation: 20%
 
 **详细解析：**
 
@@ -64,7 +64,7 @@
 
 ## 7. 答案：B
 
-**考点与权重：** huffman-tree: 75%, greedy: 20%, tree-theory: 5%
+**考点与权重：** huffman-tree: 80%, greedy: 20%
 
 **详细解析：**
 
@@ -74,7 +74,7 @@
 
 ## 8. 答案：C
 
-**考点与权重：** tree-data-structures: 80%, array-basic: 20%
+**考点与权重：** complete-binary-tree: 80%, arithmetic-operation: 20%
 
 **详细解析：**
 
@@ -84,7 +84,7 @@
 
 ## 9. 答案：A
 
-**考点与权重：** graph-theory: 90%, combinatorics: 10%
+**考点与权重：** graph-theory: 90%, counting-principle: 10%
 
 **详细解析：**
 
@@ -94,7 +94,7 @@
 
 ## 10. 答案：D
 
-**考点与权重：** stack: 70%, queue: 16%, graph-theory: 9%, linear-data-structures: 5%
+**考点与权重：** stack: 70%, queue: 20%, simulation: 10%
 
 **详细解析：**
 
@@ -104,7 +104,7 @@
 
 ## 11. 答案：D
 
-**考点与权重：** linked-list: 70%, language-basics: 30%
+**考点与权重：** linked-list: 80%, linear-data-structures: 20%
 
 **详细解析：**
 
@@ -114,7 +114,7 @@
 
 ## 12. 答案：B
 
-**考点与权重：** sorting: 70%, basic-algorithms: 30%
+**考点与权重：** bubble-sort: 80%, array-basic: 20%
 
 **详细解析：**
 
@@ -124,7 +124,7 @@
 
 ## 13. 答案：C
 
-**考点与权重：** base-conversion: 80%, mathematics: 20%
+**考点与权重：** base-conversion: 80%, arithmetic-operation: 20%
 
 **详细解析：**
 
@@ -134,7 +134,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 14. 答案：A
 
-**考点与权重：** string-basic: 70%, enumeration: 23%, combinatorics: 7%
+**考点与权重：** string-basic: 70%, enumeration: 23%, counting-principle: 7%
 
 **详细解析：**
 
@@ -144,7 +144,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 15. 答案：B
 
-**考点与权重：** recursion: 80%, function-recursion-basic: 20%
+**考点与权重：** object-oriented-programming: 80%, computer-basic: 20%
 
 **详细解析：**
 
@@ -156,7 +156,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 16. 答案：√
 
-**考点与权重：** language-basics: 70%, bitwise: 22%, simulation: 8%
+**考点与权重：** language-basics: 70%, computer-basic: 30%
 
 **详细解析：**
 
@@ -166,7 +166,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 17. 答案：×
 
-**考点与权重：** language-basics: 85%, bitwise: 15%
+**考点与权重：** language-basics: 70%, computer-basic: 30%
 
 **详细解析：**
 
@@ -216,7 +216,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 22. 答案：×
 
-**考点与权重：** recursion: 70%, loop-structure: 15%, simulation: 15%
+**考点与权重：** recursive-tracing: 70%, recursion: 30%
 
 **详细解析：**
 
@@ -226,7 +226,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 23. 答案：√
 
-**考点与权重：** dynamic-programming: 70%, recursion: 19%, ad-hoc: 11%
+**考点与权重：** recursion: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -236,7 +236,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 24. 答案：√
 
-**考点与权重：** conditional-branch: 70%, recursion: 19%, function-recursion-basic: 11%
+**考点与权重：** condition-simulation: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -256,7 +256,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 26. 答案：C
 
-**考点与权重：** recurrence: 70%, dynamic-programming: 19%, mathematics: 11%
+**考点与权重：** recurrence: 70%, dynamic-programming: 19%, arithmetic-operation: 11%
 
 **详细解析：**
 
@@ -266,7 +266,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 27. 答案：B
 
-**考点与权重：** dynamic-programming: 70%, recurrence: 19%, mathematics: 11%
+**考点与权重：** dynamic-programming: 70%, recurrence: 19%, arithmetic-operation: 11%
 
 **详细解析：**
 
@@ -276,7 +276,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 28. 答案：√
 
-**考点与权重：** basic-algorithms: 70%, binary-search: 19%, loop-structure: 11%
+**考点与权重：** binary-search: 80%, loop-tracing: 20%
 
 **详细解析：**
 
@@ -286,7 +286,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 29. 答案：√
 
-**考点与权重：** binary-search: 70%, mathematics: 17%, loop-structure: 13%
+**考点与权重：** binary-search: 70%, arithmetic-operation: 17%, loop-structure: 13%
 
 **详细解析：**
 
@@ -296,7 +296,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 30. 答案：×
 
-**考点与权重：** language-basics: 70%, mathematics: 19%, loop-structure: 11%
+**考点与权重：** perfect-square: 70%, loop-tracing: 30%
 
 **详细解析：**
 
@@ -306,7 +306,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 31. 答案：×
 
-**考点与权重：** language-basics: 70%, binary-search: 19%, mathematics: 11%
+**考点与权重：** binary-search: 80%, loop-tracing: 20%
 
 **详细解析：**
 
@@ -316,7 +316,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 32. 答案：C
 
-**考点与权重：** mathematics: 70%, loop-structure: 15%, simulation: 15%
+**考点与权重：** arithmetic-operation: 70%, counting-principle: 30%
 
 **详细解析：**
 
@@ -326,7 +326,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 33. 答案：B
 
-**考点与权重：** mathematics: 70%, loop-structure: 18%, simulation: 12%
+**考点与权重：** perfect-square: 70%, loop-tracing: 30%
 
 **详细解析：**
 
@@ -336,7 +336,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 34. 答案：A
 
-**考点与权重：** binary-search: 70%, mathematics: 20%, loop-structure: 10%
+**考点与权重：** binary-search: 70%, arithmetic-operation: 20%, loop-structure: 10%
 
 **详细解析：**
 
@@ -348,7 +348,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 35. 答案：A
 
-**考点与权重：** number-theory: 70%, enumeration: 21%, conditional-branch: 9%
+**考点与权重：** modulo-operation: 70%, arithmetic-operation: 30%
 
 **详细解析：**
 
@@ -358,7 +358,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 36. 答案：B
 
-**考点与权重：** array-basic: 70%, enumeration: 19%, language-basics: 11%
+**考点与权重：** array-basic: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -368,7 +368,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 37. 答案：C
 
-**考点与权重：** loop-structure: 70%, mathematics: 17%, conditional-branch: 13%
+**考点与权重：** perfect-square: 70%, loop-tracing: 30%
 
 **详细解析：**
 
@@ -378,7 +378,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 38. 答案：D
 
-**考点与权重：** mathematics: 70%, language-basics: 30%
+**考点与权重：** arithmetic-operation: 70%, counting-principle: 30%
 
 **详细解析：**
 
@@ -388,7 +388,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 39. 答案：A
 
-**考点与权重：** array-basic: 70%, enumeration: 17%, mathematics: 13%
+**考点与权重：** array-basic: 70%, code-tracing: 30%
 
 **详细解析：**
 
@@ -398,7 +398,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 40. 答案：A
 
-**考点与权重：** bfs: 70%, array-basic: 16%, conditional-branch: 14%
+**考点与权重：** memory-size-calculation: 70%, bit-byte: 30%
 
 **详细解析：**
 
@@ -418,7 +418,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 42. 答案：C
 
-**考点与权重：** bfs: 70%, array-basic: 19%, simulation: 11%
+**考点与权重：** memory-size-calculation: 70%, bit-byte: 30%
 
 **详细解析：**
 
@@ -438,7 +438,7 @@ $32.1_8=3\times8+2+1\times8^{-1}=24+2+0.125=26.125$。
 
 ## 44. 答案：A
 
-**考点与权重：** queue: 70%, bfs: 20%, simulation: 10%
+**考点与权重：** queue: 70%, code-tracing: 30%
 
 **详细解析：**
 

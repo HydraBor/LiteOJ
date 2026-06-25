@@ -123,6 +123,7 @@ COOKIE_SECURE=auto
 
 ```dotenv
 JUDGE_POLL_INTERVAL_MS=2000
+JUDGE_LOCK_TIMEOUT_SECONDS=600
 JUDGE_MAX_OUTPUT_BYTES=1048576
 GO_JUDGE_URL=http://127.0.0.1:5050
 GO_JUDGE_PROCESS_LIMIT=64
@@ -137,6 +138,13 @@ TESTDATA_ZIP_LIMIT=50
 TESTDATA_UNZIPPED_LIMIT=200
 ATTACHMENT_FILE_LIMIT=200
 CHECKER_SOURCE_LIMIT=1
+MANUAL_CASE_LIMIT=5
+PROBLEM_STORAGE_LIMIT=500
+MAX_CODE_SIZE_KB=128
+SUBMIT_RATE_LIMIT=20
+SUBMIT_RATE_WINDOW_SECONDS=60
+MAX_PENDING_SUBMISSIONS_PER_USER=20
+MAX_JUDGE_QUEUE=500
 ```
 
 单位说明：
@@ -145,6 +153,13 @@ CHECKER_SOURCE_LIMIT=1
 - `TESTDATA_UNZIPPED_LIMIT`：MB，zip 解压后总大小。
 - `ATTACHMENT_FILE_LIMIT`：MB，题面附件单文件大小，默认用于 CSP 复赛数据包等下载附件。
 - `CHECKER_SOURCE_LIMIT`：MB，checker.cpp 源码大小。
+- `MANUAL_CASE_LIMIT`：MB，手动录入单个输入或输出的大小。
+- `PROBLEM_STORAGE_LIMIT`：MB，单题测试数据、附件和 checker 的总容量。
+- `MAX_CODE_SIZE_KB`：KB，单次提交代码大小。
+- `SUBMIT_RATE_LIMIT` / `SUBMIT_RATE_WINDOW_SECONDS`：单用户提交频率限制。
+- `MAX_PENDING_SUBMISSIONS_PER_USER`：单用户最多同时处于 Waiting/Judging 的提交数。
+- `MAX_JUDGE_QUEUE`：全站最多同时处于 Waiting/Judging 的提交数。
+- `JUDGE_LOCK_TIMEOUT_SECONDS`：`Judging` 任务超时未回写后自动回收为 `Waiting` 的时间。
 - `SPJ_TIMEOUT_MS`：毫秒，checker 单次运行时间。
 - `SPJ_MEMORY_LIMIT_MB`：MB，checker 单次运行内存。
 
@@ -290,17 +305,20 @@ docker compose run --rm --no-deps app node - <<'NODE'
 const { db } = require('./backend/db');
 const { hashPassword } = require('./backend/passwords');
 
+const username = 'admin';
+const password = 'admin123';
+
 db.transaction(() => {
   db.prepare('DELETE FROM submissions').run();
   db.prepare('DELETE FROM prelim_attempts').run();
   db.prepare('DELETE FROM prelim_mock_exams').run();
-  db.prepare("DELETE FROM users WHERE username <> 'admin'").run();
-  const hash = hashPassword('admin123');
-  const admin = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
+  db.prepare('DELETE FROM users WHERE username <> ?').run(username);
+  const hash = hashPassword(password);
+  const admin = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
   if (admin) {
-    db.prepare("UPDATE users SET password_hash = ?, role = 'admin' WHERE username = 'admin'").run(hash);
+    db.prepare("UPDATE users SET password_hash = ?, role = 'admin' WHERE username = ?").run(hash, username);
   } else {
-    db.prepare("INSERT INTO users (username, password_hash, role) VALUES ('admin', ?, 'admin')").run(hash);
+    db.prepare("INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')").run(username, hash);
   }
 })();
 NODE

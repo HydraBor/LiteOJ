@@ -345,11 +345,11 @@ function languageLabel(value) {
   const item = SUBMISSION_LANGUAGES.find((lang) => lang.value === value);
   return item ? item.label : String(value || '未知');
 }
-const PROBLEM_ID_PATTERN = /^[A-Z]+\d+$/;
+const PROBLEM_ID_PATTERN = /^[A-Z]+\d+(?:T\d+)?$/;
 function validateProblemIdForUI(value) {
   const id = String(value || '').trim();
   if (!PROBLEM_ID_PATTERN.test(id)) {
-    alert('题号格式错误：题号必须由若干大写英文字母 + 若干数字组成，例如 P1001、ABC12。');
+    alert('题号格式错误：题号必须由若干大写英文字母 + 若干数字组成，可选 T + 题位，例如 P1001、ABC12、CSPJ25T1。');
     return false;
   }
   return true;
@@ -1738,6 +1738,12 @@ function analyticsGroupSelect(groups = [], selected = '') {
   const valid = new Set([...(groups || []), ...list]);
   return `<select name="groupName" class="analytics-group-select"><option value="" ${selected ? '' : 'selected'}>请选择组别</option>${list.filter((g) => valid.has(g)).map((g) => `<option value="${esc(g)}" ${selected === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>`;
 }
+function analyticsRoundSelect(rounds = [], selected = '初赛') {
+  const list = ['初赛', '复赛'];
+  const valid = new Set([...(rounds || []), ...list]);
+  const value = selected || '初赛';
+  return `<select name="roundName" class="analytics-round-select">${list.filter((r) => valid.has(r)).map((r) => `<option value="${esc(r)}" ${value === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>`;
+}
 function analyticsCountBarChart(counts = []) {
   const shown = counts;
   if (!shown.length) return '<p class="muted">暂无可统计的考点数据。</p>';
@@ -1806,6 +1812,66 @@ function analyticsYearCompare(stats) {
   }).join('')}</tbody></table></div>`;
 }
 
+function analyticsSummaryStrip(stats, roundName) {
+  const summary = stats?.summary || {};
+  const firstCount = roundName === '复赛' ? (summary.problemCount || 0) : (summary.questionCount || 0);
+  const firstLabel = roundName === '复赛' ? '复赛题目' : '初赛小题';
+  const secondLabel = roundName === '复赛' ? '年份数量' : '试卷数量';
+  return `<div class="analytics-summary-strip">
+    <div><b>${esc(firstCount)}</b><span>${firstLabel}</span></div>
+    <div><b>${esc(summary.paperCount || 0)}</b><span>${secondLabel}</span></div>
+    <div><b>${esc(summary.examPointCount || 0)}</b><span>考点数量</span></div>
+    <div><b>${esc(analyticsScore(summary.totalScore || 0))}</b><span>统计分值</span></div>
+  </div>`;
+}
+
+function analyticsDifficultyChart(items = []) {
+  if (!items.length) return '<p class="muted">暂无难度数据。</p>';
+  const max = Math.max(...items.map((x) => Number(x.count) || 0), 1);
+  return `<div class="analytics-difficulty-chart">${items.map((item) => `<div class="analytics-difficulty-row">
+    <div class="analytics-difficulty-label">${difficultyBadge(item.difficulty)}<b>${esc(item.count)} 题</b></div>
+    <div class="analytics-count-track"><i style="width:${Math.max(8, Math.min(100, (Number(item.count) || 0) / max * 100))}%"></i></div>
+  </div>`).join('')}</div>`;
+}
+
+function analyticsFinalTaskCards(stats) {
+  const tasks = stats.byTask || [];
+  if (!tasks.length) return '<p class="muted">暂无 T1-T4 题位数据。</p>';
+  return `<div class="analytics-task-grid">${tasks.map((task) => `<article class="analytics-task-card">
+    <div class="analytics-task-head"><h3>${esc(task.task)}</h3><span>${esc(task.problemCount || 0)} 题</span></div>
+    <div class="analytics-task-tags">${(task.topTags || []).slice(0, 5).map((tag) => `<span>${esc(tag.tag)}<b>${esc(tag.count)}</b></span>`).join('') || '<em>暂无考点</em>'}</div>
+    <div class="analytics-task-difficulties">${(task.difficulties || []).map((d) => `<span>${esc(d.label)} × ${esc(d.count)}</span>`).join('') || '<span>暂无难度</span>'}</div>
+  </article>`).join('')}</div>`;
+}
+
+function analyticsTaskHeatmap(stats) {
+  const rows = stats.taskHeatmap || [];
+  if (!rows.length) return '<p class="muted">暂无题位热力数据。</p>';
+  const max = Math.max(...rows.flatMap((row) => row.counts || [0]).map((x) => Number(x) || 0), 1);
+  const tasks = ['T1', 'T2', 'T3', 'T4'];
+  return `<div class="analytics-heatmap"><table><thead><tr><th>考点</th>${tasks.map((task) => `<th>${task}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>
+    <td><b>${esc(row.tag)}</b></td>${tasks.map((_, index) => {
+      const count = Number(row.counts?.[index] || 0);
+      const alpha = count ? Math.max(.12, count / max) : 0;
+      const colorAlpha = count ? (.06 + alpha * .32).toFixed(3) : '.04';
+      return `<td><span style="background:rgba(37, 99, 235, ${colorAlpha})">${esc(count)}</span></td>`;
+    }).join('')}
+  </tr>`).join('')}</tbody></table></div>`;
+}
+
+function analyticsFinalProblemTable(stats) {
+  const problems = stats.problems || [];
+  if (!problems.length) return '<p class="muted">暂无符合 CSPJ25T1 / CSPS25T1 题号规则的公开复赛题目。</p>';
+  return `<div class="analytics-compare-table"><table><thead><tr><th>题号</th><th>题目</th><th>年份</th><th>题位</th><th>难度</th><th>标签</th></tr></thead><tbody>${problems.map((p) => `<tr>
+    <td><b>${esc(p.id)}</b></td>
+    <td>${esc(p.title)}</td>
+    <td>${esc(p.year)}</td>
+    <td>${esc(p.task)}</td>
+    <td>${difficultyBadge(p.difficulty)}</td>
+    <td>${(p.tagNames || []).map((tag) => `<span class="tag">${esc(tag)}</span>`).join('') || '<span class="muted">未标注</span>'}</td>
+  </tr>`).join('')}</tbody></table></div>`;
+}
+
 function bindAnalyticsYearDropdown() {
   if (window.__liteojAnalyticsYearDropdownBound) return;
   const closeOutside = (event) => {
@@ -1852,30 +1918,52 @@ function bindAnalyticsDonutTooltip() {
 async function renderAnalytics() {
   setImmersive(false);
   const params = new URLSearchParams(location.search);
-  const options = await api('/api/analytics/prelim/options');
   const selectedYears = analyticsSelectedYears(params);
   const selectedGroup = params.get('groupName') || params.get('group') || '';
-  const hasAnalysis = Boolean(selectedYears.length && selectedGroup);
+  const selectedRound = params.get('roundName') || params.get('round') || '初赛';
+  const optionQuery = new URLSearchParams();
+  if (selectedGroup) optionQuery.set('groupName', selectedGroup);
+  if (selectedRound) optionQuery.set('roundName', selectedRound);
+  const options = await api('/api/analytics/options' + (optionQuery.toString() ? `?${optionQuery}` : ''));
+  const hasAnalysis = Boolean(selectedYears.length && selectedGroup && selectedRound);
   const query = new URLSearchParams();
   if (selectedYears.length) query.set('years', selectedYears.join(','));
   if (selectedGroup) query.set('groupName', selectedGroup);
-  const stats = hasAnalysis ? await api('/api/analytics/prelim/knowledge' + (query.toString() ? `?${query}` : '')) : null;
+  if (selectedRound) query.set('roundName', selectedRound);
+  const stats = hasAnalysis ? await api('/api/analytics/knowledge' + (query.toString() ? `?${query}` : '')) : null;
   app.innerHTML = `<div class="analytics-page">
     <div class="card filter-panel-card analytics-filter-card">
       <form id="analyticsFilter" class="filter-panel-grid analytics-filter-grid compact-analytics-filter">
-        <label class="analytics-years-control">年份${analyticsYearDropdown(options.years || [], selectedYears)}</label>
         <label>组别${analyticsGroupSelect(options.groups || ['CSP-J', 'CSP-S'], selectedGroup)}</label>
+        <label>场次${analyticsRoundSelect(options.rounds || ['初赛', '复赛'], selectedRound)}</label>
+        <label class="analytics-years-control">年份${analyticsYearDropdown(options.years || [], selectedYears)}</label>
         <div class="filter-actions"><button class="primary">分析</button><button type="button" class="reset-btn" data-route="/analytics">重置</button></div>
       </form>
     </div>
-    ${stats ? `<div class="analytics-grid-main equal">
+    ${stats ? `${analyticsSummaryStrip(stats, selectedRound)}<div class="analytics-grid-main equal">
       <section class="card analytics-chart-card analytics-count-card"><div class="table-headline"><h2>考点出现次数</h2></div>${analyticsCountBarChart(stats.counts || [])}</section>
       <section class="card analytics-chart-card analytics-donut-card"><div class="table-headline"><h2>考点加权分值</h2></div>${analyticsDonutChart(stats.items || [])}</section>
     </div>
+    ${selectedRound === '复赛' ? `<div class="analytics-grid-main equal">
+      <section class="card analytics-chart-card"><div class="table-headline"><h2>T1-T4 题位画像</h2></div>${analyticsFinalTaskCards(stats)}</section>
+      <section class="card analytics-chart-card"><div class="table-headline"><h2>难度标签分布</h2></div>${analyticsDifficultyChart(stats.difficultyItems || [])}</section>
+    </div>
+    <section class="card analytics-chart-card"><div class="table-headline"><h2>题位/考点热力表</h2></div>${analyticsTaskHeatmap(stats)}</section>
+    <section class="card analytics-chart-card"><div class="table-headline"><h2>复赛题目明细</h2></div>${analyticsFinalProblemTable(stats)}</section>` : ''}
     <section class="card analytics-chart-card"><div class="table-headline"><h2>考点/年份对照表</h2></div>${analyticsYearCompare(stats)}</section>` : ''}
   </div>`;
   bindAnalyticsYearDropdown();
   bindAnalyticsDonutTooltip();
+  qsa('#analyticsFilter select[name="groupName"], #analyticsFilter select[name="roundName"]').forEach((select) => {
+    select.onchange = () => {
+      const form = qs('#analyticsFilter');
+      const f = formData(form);
+      const q = new URLSearchParams();
+      if (f.groupName) q.set('groupName', f.groupName);
+      if (f.roundName) q.set('roundName', f.roundName);
+      nav('/analytics' + (q.toString() ? `?${q}` : ''));
+    };
+  });
   qs('#analyticsFilter').onsubmit = (e) => {
     e.preventDefault();
     const form = e.target;
@@ -1883,9 +1971,11 @@ async function renderAnalytics() {
     if (!years.length) { alert('请至少选择一个年份。'); return; }
     const f = formData(form);
     if (!f.groupName) { alert('请选择组别。'); return; }
+    if (!f.roundName) { alert('请选择场次。'); return; }
     const q = new URLSearchParams();
     q.set('years', years.join(','));
     q.set('groupName', f.groupName);
+    q.set('roundName', f.roundName);
     nav('/analytics?' + q.toString());
   };
 }
@@ -2107,7 +2197,7 @@ function currentProblemIdForAttachment(input) {
     return null;
   }
   if (!PROBLEM_ID_PATTERN.test(id)) {
-    alert('题号格式错误：题号必须由若干大写英文字母 + 若干数字组成，例如 P1001、ABC12。');
+    alert('题号格式错误：题号必须由若干大写英文字母 + 若干数字组成，可选 T + 题位，例如 P1001、ABC12、CSPJ25T1。');
     return null;
   }
   return id;

@@ -94,7 +94,9 @@ scripts/
 - 管理接口使用 `requireAdmin`。
 - 登录接口和注册接口使用基础 IP 限速。
 - judge 内部接口使用 `x-judge-token`。
+- `/api/judge/acquire` 只返回测试点元数据；测试点正文通过 `/api/judge/cases/:caseId/:kind` 按需读取。
 - 题目 ID 必须满足大写字母 + 数字，例如 `P1001`、`ABC12`。
+- 复赛题目可使用 `CSPJ25T1` / `CSPS25T4`，其中 `25` 表示 2025 年，`T1`~`T4` 表示复赛题位。
 
 新增 API 时需要：
 
@@ -143,6 +145,8 @@ zip 导入规则：
 - zip 中 `checker.cpp` 会保存为题目级 Special Judge；
 - 当前 UI 的子任务模式开启时，导入测试点默认放入 `子任务1`。
 
+容量限制由 `.env` 控制：`TESTDATA_ZIP_LIMIT`、`TESTDATA_UNZIPPED_LIMIT`、`MANUAL_CASE_LIMIT`、`ATTACHMENT_FILE_LIMIT`、`PROBLEM_STORAGE_LIMIT` 和 `CHECKER_SOURCE_LIMIT`。
+
 ### 子任务
 
 子任务只关心整组分值。
@@ -155,11 +159,16 @@ zip 导入规则：
 
 执行阶段：
 
-1. 编译 checker.cpp，若题目启用 SPJ；
-2. 编译用户代码；
-3. 逐测试点运行用户程序；
-4. 用户程序成功后运行 checker；
-5. 汇总分数。
+1. worker 领取 `Waiting` 提交并写入 `Judging` 锁；
+2. runner 按测试点从共享目录或后端 case 文件接口读取输入/输出；
+3. 编译 checker.cpp，若题目启用 SPJ；
+4. 编译用户代码；
+5. 逐测试点运行用户程序；
+6. 用户程序成功后运行 checker；
+7. 汇总分数；
+8. worker 带 `judgeId` 写回结果，后端只接受仍匹配当前锁的结果。
+
+`JUDGE_LOCK_TIMEOUT_SECONDS` 控制 `Judging` 任务的超时回收。worker 崩溃后，下一次 `/api/judge/acquire` 会把过期锁恢复为 `Waiting`。
 
 go-judge result 被归一化为：
 
@@ -273,12 +282,24 @@ npm run real-smoke
 
 ## 数据分析规则
 
-`/api/analytics/prelim/knowledge` 使用当前题库数据计算：
+`/api/analytics/knowledge` 按 `roundName` 分流：
+
+- `初赛`：复用 `/api/analytics/prelim/knowledge`，使用初赛题库数据；
+- `复赛`：使用公开编程题库中符合 `CSPJ25T1` / `CSPS25T1` 规则的题目。
+
+初赛分析计算：
 
 - 考点出现次数：每小题内去重后计数；
 - 加权分值：按 canonical slug 聚合；一个考点得满分，两个及以上考点取权重最高的两个；
 - 权重缺失或全为 0 时平均分配；
 - 结果按年份和组别筛选。
+
+复赛分析计算：
+
+- 年份、组别、题位从题号解析；
+- 每道复赛题按 100 分计入加权分值；
+- 标签贡献沿用编程题标签权重；
+- 输出 T1-T4 题位画像、难度分布、题位/考点热力表和题目明细。
 
 ## 前端开发约定
 

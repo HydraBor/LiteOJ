@@ -177,6 +177,23 @@ async function main() {
   assert((prelimFacets.tags || []).some((tag) => tag.value === 'language-basics' || tag.slug === 'language-basics'), 'prelim facets should expose fixed tag slugs');
   const analytics = await request('GET', '/api/analytics/prelim/knowledge?years=2025&groupName=CSP-J');
   assert((analytics.items || []).some((item) => item.slug && item.tag), 'analytics should return slug-based tag items with display names');
+  const finalProblem = await request('POST', '/api/problems', {
+    id: 'CSPJ25T1',
+    title: '复赛分析烟测题',
+    description: '# 复赛题\n\n用于测试 T1 分析。',
+    difficulty: 'popular_plus',
+    timeLimit: 1000,
+    memoryLimit: 128,
+    tags: ['dynamic-programming', 'array-basic'],
+    isPublic: true,
+  });
+  assert.strictEqual(finalProblem.problem.id, 'CSPJ25T1', 'final-round problem id should be accepted');
+  const finalOptions = await request('GET', '/api/analytics/options?groupName=CSP-J&roundName=复赛');
+  assert(finalOptions.years.includes(2025), 'final analytics options should derive years from CSPJ25T1-style problem ids');
+  const finalAnalytics = await request('GET', '/api/analytics/knowledge?years=2025&groupName=CSP-J&roundName=复赛');
+  assert.strictEqual(finalAnalytics.summary.problemCount, 1, 'final analytics should count public final-round programming problems');
+  assert((finalAnalytics.byTask || []).some((item) => item.task === 'T1' && item.problemCount === 1), 'final analytics should group problems by T1-T4');
+  assert((finalAnalytics.difficultyItems || []).some((item) => item.difficulty === 'popular_plus'), 'final analytics should expose difficulty distribution');
   const prelimItems = await request('GET', '/api/prelim/items');
   assert(prelimItems.items.length > 0, 'prelim item list should work');
   const mockPapers = await request('GET', '/api/prelim/mock/papers');
@@ -192,6 +209,7 @@ async function main() {
 
   await request('DELETE', `/api/problems/${encodeURIComponent(cloneId)}`);
   await request('DELETE', `/api/problems/${encodeURIComponent(problemId)}`);
+  await request('DELETE', '/api/problems/CSPJ25T1');
   const resetUserName = `u${Date.now()}`;
   const registered = await request('POST', '/api/auth/register', { username: resetUserName, password: 'oldpass1' });
   assert.strictEqual(registered.user.role, 'user', 'new public registrant should be a normal user');
@@ -201,7 +219,7 @@ async function main() {
   await request('POST', '/api/auth/login', { username: resetUserName, password: '123456' });
   const resetMe = await request('GET', '/api/auth/me');
   assert.strictEqual(resetMe.user.username, resetUserName, 'user should be able to login with the reset password');
-  console.log('Real smoke test passed: admin create/edit/cases/zip/clone/status/delete, submit, prelim list, and mock flow work.');
+  console.log('Real smoke test passed: admin problem flow, submit, prelim/mock flow, and final-round analytics work.');
 }
 
 main().catch((err) => {

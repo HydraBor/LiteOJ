@@ -6,6 +6,36 @@ const { createGoJudgeExecution } = require('./go-judge-client');
 
 const TESTLIB_PATH = path.join(__dirname, 'testlib.h');
 
+function safeRelativePath(baseDir, relPath) {
+  const base = path.resolve(baseDir);
+  const resolved = path.resolve(base, relPath);
+  if (resolved !== base && !resolved.startsWith(base + path.sep)) throw new Error('invalid judge data path');
+  return resolved;
+}
+
+async function fetchText(url, token) {
+  const res = await fetch(url, { headers: { 'X-Judge-Token': token } });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${await res.text()}`);
+  return res.text();
+}
+
+async function readCaseContent(task, test, kind) {
+  if (typeof test[kind] === 'string') return test[kind];
+
+  const pathKey = `${kind}Path`;
+  const dataDir = task.dataDir || process.env.JUDGE_DATA_DIR || '';
+  if (dataDir && test[pathKey] && fs.existsSync(dataDir)) {
+    return fs.readFileSync(safeRelativePath(dataDir, test[pathKey]), 'utf8');
+  }
+
+  if (task.backendUrl && task.judgeToken && test.id) {
+    const base = String(task.backendUrl).replace(/\/+$/, '');
+    return fetchText(`${base}/api/judge/cases/${test.id}/${kind}`, task.judgeToken);
+  }
+
+  throw new Error(`missing ${kind} data for case #${test.id || test.sort || '?'}`);
+}
+
 function applyScoring(details) {
   const totalPossible = details.reduce((sum, item) => sum + (Number(item.rawScore) || 0), 0);
   const allAccepted = details.length > 0 && details.every((item) => item.status === 'Accepted');
@@ -184,9 +214,12 @@ async function judgeTask(task) {
     }
 
     for (const test of cases) {
+      const input = await readCaseContent(task, test, 'input');
+      const output = await readCaseContent(task, test, 'output');
+      const hydratedTest = { ...test, input, output };
       const timeoutMs = Number(test.timeLimit || task.problem.timeLimit || 1000);
       const runRes = await execution.run(language.run(''), {
-        input: test.input,
+        input,
         timeoutMs,
         memoryLimitMb: Number(test.memoryLimit || task.problem.memoryLimit || 128),
       });
@@ -196,14 +229,14 @@ async function judgeTask(task) {
       let checkerRes = null;
       if (task.problem.checkerMode === 'special_judge' && runRes.code === 0 && !runRes.timeout && !runRes.systemError && !runRes.memoryLimitExceeded && !runRes.outputLimitExceeded) {
         checkerRes = await execution.runChecker({
-          input: test.input,
+          input,
           output: runRes.stdout,
-          answer: test.output,
+          answer: output,
           timeoutMs: Number(process.env.SPJ_TIMEOUT_MS || 3000),
           memoryLimitMb: Number(process.env.SPJ_MEMORY_LIMIT_MB || 256),
         });
       }
-      const detail = runResultToCase(runRes, task, test, checkerRes);
+      const detail = runResultToCase(runRes, task, hydratedTest, checkerRes);
       details.push(detail);
       if (shouldStopJudging(detail.status)) break;
     }

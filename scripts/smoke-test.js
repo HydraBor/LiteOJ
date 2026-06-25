@@ -41,11 +41,15 @@ assert(profileRoutesJs.includes("router.post('/password'") && profileRoutesJs.in
 
 assert.strictEqual(parseProblemCode('P1001'), 'P1001');
 assert.strictEqual(parseProblemCode('ABC12'), 'ABC12');
+assert.strictEqual(parseProblemCode('CSPJ25T1'), 'CSPJ25T1');
+assert.strictEqual(parseProblemCode('CSPS2025T4'), 'CSPS2025T4');
 assert.strictEqual(parseProblemCode('p1001'), null);
 assert.strictEqual(parseProblemCode('1001'), null);
 assert.strictEqual(parseProblemCode('P-1001'), null);
 assert.strictEqual(parseProblemCode('P1001A'), null);
+assert.strictEqual(parseProblemCode('CSP-J25T1'), null);
 assert.deepStrictEqual(['P10', 'ABC10', 'ABC2', 'B1', 'P1'].sort(compareProblemCode), ['ABC2', 'ABC10', 'B1', 'P1', 'P10']);
+assert.deepStrictEqual(['CSPJ25T4', 'CSPJ25T1', 'CSPJ24T3'].sort(compareProblemCode), ['CSPJ24T3', 'CSPJ25T1', 'CSPJ25T4']);
 assert.deepStrictEqual(ids(sortProblems([
   { id: 'P10', title: 'x' },
   { id: 'P2', title: 'x' },
@@ -127,17 +131,20 @@ assert(analyticsRoutes.includes('contributionTagsForQuestion') && analyticsRoute
 assert(analyticsRoutes.includes('counts,') && analyticsRoutes.includes('items,') && analyticsRoutes.includes('byYear,'), 'analytics API should return counts, weighted scores, and year comparison data');
 assert(analyticsRoutes.includes('defaultYears: []') && analyticsRoutes.includes("defaultGroup: ''"), 'analytics options should not preselect year or group');
 assert(analyticsRoutes.includes('examPointCount') && analyticsRoutes.includes('knowledgeCount'), 'analytics summary should expose current exam-point count while keeping compatibility');
+assert(analyticsRoutes.includes("router.get('/options'") && analyticsRoutes.includes("router.get('/knowledge'") && analyticsRoutes.includes('parseFinalProblemId'), 'analytics route should expose unified preliminary/final analysis endpoints');
+assert(analyticsRoutes.includes('FINAL_TASKS') && analyticsRoutes.includes('taskHeatmap') && analyticsRoutes.includes('difficultyItems'), 'final-round analytics should summarize T1-T4, heatmap, and difficulty data');
 
 const appJs = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public', 'app.js'), 'utf8');
 const outsideUiNamePattern = new RegExp(['hy', 'dro', '|', 'ac', 'go'].join(''), 'i');
 const cssModuleNamePattern = /[A-Za-z]+_[A-Za-z0-9]+__/;
 
-assert(appJs.includes('analyticsYearDropdown') && appJs.includes('analyticsGroupSelect'), 'frontend analytics should use a compact year dropdown and select-style group filter');
+assert(appJs.includes('analyticsYearDropdown') && appJs.includes('analyticsGroupSelect') && appJs.includes('analyticsRoundSelect'), 'frontend analytics should use compact group/round/year filters');
 assert(appJs.includes('compact-analytics-filter') && appJs.includes('filter-panel-grid') && !appJs.includes('analytics-filter-field') && !appJs.includes('page-head analytics-head'), 'analytics filter should follow the shared filter panel grid instead of custom field wrappers or page head');
 assert(!appJs.includes('按年份和组别统计初赛题库中的知识点出现次数与加权分值贡献。') && !appJs.includes("routeLink('/prelim', '返回初赛题库'") && !appJs.includes('<h1>数据分析</h1>'), 'analytics page should remove redundant title, explanatory text, and return link');
 assert(appJs.includes('考点出现次数') && appJs.includes('考点加权分值') && appJs.includes('考点/年份对照表') && !appJs.includes('知识点出现次数') && !appJs.includes('知识点加权分值') && !appJs.includes('知识点/年份对照表'), 'analytics page should use 考点 wording');
 assert(!appJs.includes('<h1>后台管理</h1>') && !appJs.includes('<h1>个人主页</h1>') && !appJs.includes('查看账号信息并修改登录密码。') && !appJs.includes('密码会使用 bcrypt 单向哈希存储'), 'admin/profile pages should not render removed headings or password storage hint');
 assert(appJs.includes('analyticsCountBarChart') && appJs.includes('analyticsDonutChart') && appJs.includes('analyticsYearCompare'), 'frontend analytics should render count bar chart, weighted donut chart, and year comparison table');
+assert(appJs.includes('analyticsFinalTaskCards') && appJs.includes('analyticsTaskHeatmap') && appJs.includes('analyticsDifficultyChart'), 'frontend analytics should render final-round T1-T4, heatmap, and difficulty charts');
 assert(!appJs.includes("tag: '其他'") && !appJs.includes("tag: \"其他\""), 'analytics weighted donut should expand all exam points instead of merging them into 其他');
 assert(!appJs.includes('/api/analytics/prelim/cutoffs') && !appJs.includes('name="province"'), 'frontend analytics should not load cutoff lines or render province filters in the simplified version');
 assert(!outsideUiNamePattern.test(appJs) && !cssModuleNamePattern.test(appJs), 'frontend templates should use LiteOJ-owned semantic class names');
@@ -218,6 +225,9 @@ assert(authJs.includes('clearAuthCookie(req, res)'), 'stale login cookie should 
 assert(authJs.includes("res.cookie(COOKIE_NAME, 'deleted'") && authJs.includes('httpOnly: true') && authJs.includes('if (cookieSecure(req)) options.secure = true'), 'auth cookie clearing should use valid request-aware HttpOnly/Secure attributes');
 const judgeRouteJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'judge.js'), 'utf8');
 assert(judgeRouteJs.includes('JUDGE_TOKEN must be set to a strong random value in production'), 'production should reject missing or weak JUDGE_TOKEN');
+assert(judgeRouteJs.includes('JUDGE_LOCK_TIMEOUT_SECONDS') && judgeRouteJs.includes('reclaimStaleJudging'), 'judge queue should reclaim stale Judging submissions');
+assert(judgeRouteJs.includes("router.get('/cases/:caseId/:kind'") && judgeRouteJs.includes('inputPath: c.input_path') && !judgeRouteJs.includes('readDataFile(c.input_path)'), 'judge acquire should return case metadata and stream test data by case');
+assert(judgeRouteJs.includes('stale judge result ignored') && judgeRouteJs.includes("status = 'Judging'") && judgeRouteJs.includes('judge_id = ?'), 'judge result writes should be bound to the active judge lock');
 const composeYaml = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.yml'), 'utf8');
 assert(composeYaml.includes('profiles:') && composeYaml.includes('container-judge'), 'container judge should be behind an explicit compose profile');
 assert(composeYaml.includes('JWT_SECRET:?') && composeYaml.includes('JUDGE_TOKEN:?') && composeYaml.includes('ADMIN_PASSWORD:?'), 'compose should require production secrets');
@@ -244,6 +254,7 @@ assert(deployServiceScript.includes('ensure_go_judge_port_available') && deployS
 assert(deployServiceScript.includes('/dev/tcp/127.0.0.1/$port'), 'port detection should also probe loopback so WSL/Docker Desktop notices Windows-side listeners');
 assert(deployEnvScript.includes('ADMIN_USERNAME=admin') && deployEnvScript.includes('ADMIN_PASSWORD=admin123'), 'one-click script should initialize the configured admin account');
 assert(deployEnvScript.includes('CHECKER_SOURCE_LIMIT=1') && deployEnvScript.includes('SPJ_TIMEOUT_MS=3000') && deployEnvScript.includes('SPJ_MEMORY_LIMIT_MB=256'), 'one-click script should initialize Special Judge limits');
+assert(deployEnvScript.includes('JUDGE_LOCK_TIMEOUT_SECONDS=600') && deployEnvScript.includes('MAX_CODE_SIZE_KB=128') && deployEnvScript.includes('MAX_JUDGE_QUEUE=500'), 'one-click script should initialize judge reliability and submission quota limits');
 assert(deployEnvScript.includes('ensure_plain_key ADMIN_USERNAME admin') && deployEnvScript.includes('is_placeholder "$(env_value ADMIN_PASSWORD)"'), 'one-click script should not reset existing admin credentials on every start');
 assert(deployServiceScript.includes('start_judge()') && deployServiceScript.includes('judge/worker.js'), 'one-click script should start a host judge worker');
 assert(deployDockerScript.includes('mirrors.tuna.tsinghua.edu.cn/docker-ce') && deployDockerScript.includes('docker.1ms.run') && deployDockerScript.includes('Preparing base image debian:bookworm-slim') && deployDockerScript.includes('prepare_go_judge_binary'), 'deployment should prefer domestic Docker apt/registry mirrors and prepare go-judge outside Docker Hub mirrors');
@@ -265,6 +276,8 @@ const routes = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', '
 const problemFilesJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'problem-files.js'), 'utf8');
 assert(routes.includes('TESTDATA_UNZIPPED_LIMIT') && routes.includes('测试数据解压后总大小不能超过'), 'zip upload should limit total uncompressed testdata size');
 assert(routes.includes('ATTACHMENT_FILE_LIMIT') && routes.includes('multer.diskStorage') && routes.includes("'.zip'"), 'problem attachments should support bounded disk-backed download files');
+assert(routes.includes('MANUAL_CASE_LIMIT') && routes.includes('PROBLEM_STORAGE_LIMIT') && routes.includes('assertProblemStorage'), 'problem testdata and attachments should enforce per-problem storage quotas');
+assert(routes.includes('MAX_CODE_SIZE_KB') && routes.includes('SUBMIT_RATE_LIMIT') && routes.includes('MAX_PENDING_SUBMISSIONS_PER_USER') && routes.includes('MAX_JUDGE_QUEUE'), 'code submission should enforce size, frequency, user queue, and global queue limits');
 assert(routes.includes('tempAttachmentFileName') && routes.includes('contentDispositionAttachment'), 'problem attachments should use random temporary names and stable download names');
 assert(problemFilesJs.includes('function sanitizeAttachmentFileName') && !problemFilesJs.includes('return `${Date.now()}_'), 'attachment final filenames should preserve the uploaded basename instead of adding random prefixes');
 assert(routes.includes("['publish', 'public', 'show']") && routes.includes("['hide', 'hidden']"), 'problem batch visibility actions should accept configured action aliases');
@@ -337,6 +350,7 @@ const runnerJs = fs.readFileSync(path.join(__dirname, '..', 'judge', 'runner.js'
 assert(fs.existsSync(path.join(__dirname, '..', 'judge', 'testlib.h')), 'vendored testlib.h should be available for Special Judge checker compilation');
 assert(!fs.existsSync(path.join(__dirname, '..', 'judge', 'sandbox.js')), 'legacy local sandbox implementation should be removed');
 assert(!runnerJs.includes('child_process') && !runnerJs.includes('JUDGE_EXECUTOR') && !runnerJs.includes('runProcess') && runnerJs.includes('createGoJudgeExecution') && runnerJs.includes('compileChecker') && runnerJs.includes('runChecker'), 'judge runner should use go-judge as the only execution backend, including Special Judge');
+assert(runnerJs.includes('async function readCaseContent') && runnerJs.includes('/api/judge/cases/${test.id}/${kind}') && runnerJs.includes('safeRelativePath'), 'judge runner should read test data by case instead of relying on acquire JSON payloads');
 const docsText = [
   'README.md',
   'docs/ARCHITECTURE.md',

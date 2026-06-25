@@ -9,7 +9,7 @@ const DIFFICULTY_RANK = {
   ctsc: 7,
 };
 
-const PROBLEM_ID_PATTERN = /^[A-Z]+\d+$/;
+const PROBLEM_ID_PATTERN = /^[A-Z]+\d+(?:T\d+)?$/;
 
 function normalizeDifficulty(value) {
   const raw = String(value || 'unrated');
@@ -26,7 +26,7 @@ function parseProblemCode(value, options = {}) {
 function requireProblemCode(value, field = '题号') {
   const id = parseProblemCode(value);
   if (!id) {
-    const err = new Error(`${field}格式错误：题号必须由若干大写英文字母 + 若干数字组成，例如 P1001、ABC12`);
+    const err = new Error(`${field}格式错误：题号必须由若干大写英文字母 + 若干数字组成，可选 T + 题位，例如 P1001、ABC12、CSPJ25T1`);
     err.status = 400;
     throw err;
   }
@@ -34,9 +34,9 @@ function requireProblemCode(value, field = '题号') {
 }
 
 function splitProblemCode(value) {
-  const m = String(value || '').match(/^([A-Z]+)(\d+)$/);
-  if (!m) return { prefix: String(value || ''), number: 0, raw: String(value || '') };
-  return { prefix: m[1], number: Number(m[2]), raw: String(value || '') };
+  const m = String(value || '').match(/^([A-Z]+)(\d+)(?:T(\d+))?$/);
+  if (!m) return { prefix: String(value || ''), number: 0, task: 0, raw: String(value || '') };
+  return { prefix: m[1], number: Number(m[2]), task: Number(m[3] || 0), raw: String(value || '') };
 }
 
 function compareProblemCode(a, b) {
@@ -45,6 +45,7 @@ function compareProblemCode(a, b) {
   const prefix = x.prefix.localeCompare(y.prefix, 'en');
   if (prefix !== 0) return prefix;
   if (x.number !== y.number) return x.number - y.number;
+  if (x.task !== y.task) return x.task - y.task;
   return x.raw.localeCompare(y.raw, 'en');
 }
 

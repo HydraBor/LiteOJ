@@ -22,9 +22,12 @@ async function once() {
   const acquired = await postJson(`${BACKEND_URL}/api/judge/acquire`, { judgeId: JUDGE_ID });
   if (!acquired.task) return false;
   const task = acquired.task;
+  task.backendUrl = BACKEND_URL;
+  task.judgeToken = JUDGE_TOKEN;
+  task.dataDir = process.env.JUDGE_DATA_DIR || process.env.DATA_DIR || '';
   console.log(`[${JUDGE_ID}] judging submission #${task.id}, problem ${task.problem.id}, language=${task.submission.language}`);
   const result = await judgeTask(task);
-  await postJson(`${BACKEND_URL}/api/judge/${task.id}/result`, result);
+  await postJson(`${BACKEND_URL}/api/judge/${task.id}/result`, { ...result, judgeId: JUDGE_ID });
   console.log(`[${JUDGE_ID}] submission #${task.id}: ${result.status}, score=${result.score}`);
   return true;
 }

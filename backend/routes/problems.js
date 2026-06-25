@@ -37,9 +37,22 @@ const {
 } = require('../problem-files');
 
 const router = express.Router();
-const TESTDATA_ZIP_LIMIT_BYTES = Number(process.env.TESTDATA_ZIP_LIMIT || 50) * 1024 * 1024;
-const ATTACHMENT_FILE_LIMIT_BYTES = Number(process.env.ATTACHMENT_FILE_LIMIT || 200) * 1024 * 1024;
-const CHECKER_SOURCE_LIMIT_BYTES = Number(process.env.CHECKER_SOURCE_LIMIT || 1) * 1024 * 1024;
+function envNumber(name, fallback, min = 0) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) ? Math.max(min, value) : fallback;
+}
+const ONE_MB = 1024 * 1024;
+const TESTDATA_ZIP_LIMIT_BYTES = envNumber('TESTDATA_ZIP_LIMIT', 50) * ONE_MB;
+const ATTACHMENT_FILE_LIMIT_BYTES = envNumber('ATTACHMENT_FILE_LIMIT', 200) * ONE_MB;
+const CHECKER_SOURCE_LIMIT_BYTES = envNumber('CHECKER_SOURCE_LIMIT', 1) * ONE_MB;
+const TESTDATA_UNZIPPED_LIMIT_BYTES = envNumber('TESTDATA_UNZIPPED_LIMIT', 200) * ONE_MB;
+const MANUAL_CASE_LIMIT_BYTES = envNumber('MANUAL_CASE_LIMIT', 5) * ONE_MB;
+const PROBLEM_STORAGE_LIMIT_BYTES = envNumber('PROBLEM_STORAGE_LIMIT', 500) * ONE_MB;
+const MAX_CODE_BYTES = envNumber('MAX_CODE_SIZE_KB', 128) * 1024;
+const SUBMIT_RATE_LIMIT = envNumber('SUBMIT_RATE_LIMIT', 20, 1);
+const SUBMIT_RATE_WINDOW_SECONDS = envNumber('SUBMIT_RATE_WINDOW_SECONDS', 60, 1);
+const MAX_PENDING_SUBMISSIONS_PER_USER = envNumber('MAX_PENDING_SUBMISSIONS_PER_USER', 20, 1);
+const MAX_JUDGE_QUEUE = envNumber('MAX_JUDGE_QUEUE', 500, 1);
 const ATTACHMENT_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.webp',
   '.zip', '.7z', '.rar', '.tar', '.gz', '.tgz', '.bz2', '.xz',
@@ -70,10 +83,53 @@ const attachmentUpload = multer({
   }),
   limits: { fileSize: ATTACHMENT_FILE_LIMIT_BYTES },
 });
-const checkerUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Number(process.env.CHECKER_SOURCE_LIMIT || 1) * 1024 * 1024 } });
-const TESTDATA_UNZIPPED_LIMIT_BYTES = Number(process.env.TESTDATA_UNZIPPED_LIMIT || 200) * 1024 * 1024;
+const checkerUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: CHECKER_SOURCE_LIMIT_BYTES } });
 
 function getParamId(req) { return requireProblemCode(req.params.id); }
+
+function routeError(message, status = 400) {
+  return Object.assign(new Error(message), { status });
+}
+
+function bytesOf(value) {
+  return Buffer.byteLength(String(value ?? ''), 'utf8');
+}
+
+function assertTextSize(label, value, limitBytes) {
+  if (limitBytes > 0 && bytesOf(value) > limitBytes) {
+    throw routeError(`${label}不能超过 ${Math.round(limitBytes / ONE_MB)} MB`, 413);
+  }
+}
+
+function fileSizeSafe(filePath) {
+  try {
+    return fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function directorySize(dir) {
+  if (!fs.existsSync(dir)) return 0;
+  let total = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) total += directorySize(p);
+    else if (entry.isFile()) total += fileSizeSafe(p);
+  }
+  return total;
+}
+
+function assertProblemStorage(problemId, incomingBytes, options = {}) {
+  if (PROBLEM_STORAGE_LIMIT_BYTES <= 0) return;
+  let current = directorySize(problemRoot(problemId));
+  if (options.replace) {
+    current = Math.max(0, current - directorySize(path.join(problemRoot(problemId), 'testdata')));
+  }
+  if (current + Math.max(0, Number(incomingBytes) || 0) > PROBLEM_STORAGE_LIMIT_BYTES) {
+    throw routeError(`单题测试数据与附件总容量不能超过 ${Math.round(PROBLEM_STORAGE_LIMIT_BYTES / ONE_MB)} MB`, 413);
+  }
+}
 
 function nextProblemId() {
   const rows = db.prepare('SELECT id FROM problems').all();
@@ -269,7 +325,7 @@ router.post('/', requireAdmin, (req, res, next) => {
     const body = req.body || {};
     const rawId = String(body.id ?? '').trim();
     let id = parseProblemCode(rawId, { allowEmpty: true });
-    if (rawId && !id) return res.status(400).json({ error: '题号格式错误：题号必须由若干大写英文字母 + 若干数字组成，例如 P1001、ABC12' });
+    if (rawId && !id) return res.status(400).json({ error: '题号格式错误：题号必须由若干大写英文字母 + 若干数字组成，可选 T + 题位，例如 P1001、ABC12、CSPJ25T1' });
     if (!id) id = nextProblemId();
     const data = validateProblemBody(body);
     db.prepare(`INSERT INTO problems
@@ -376,7 +432,7 @@ router.post('/:id/clone', requireAdmin, (req, res, next) => {
     if (!row) return res.status(404).json({ error: '题目不存在' });
     const rawToId = String(req.body.id ?? '').trim();
     let toId = parseProblemCode(rawToId, { allowEmpty: true });
-    if (rawToId && !toId) return res.status(400).json({ error: '新题号格式错误：题号必须由若干大写英文字母 + 若干数字组成，例如 P1001、ABC12' });
+    if (rawToId && !toId) return res.status(400).json({ error: '新题号格式错误：题号必须由若干大写英文字母 + 若干数字组成，可选 T + 题位，例如 P1001、ABC12、CSPJ25T1' });
     if (!toId) toId = nextProblemId();
     if (db.prepare('SELECT id FROM problems WHERE id = ?').get(toId)) return res.status(409).json({ error: '新题号已存在' });
     const cloneTitle = String(req.body.title || '').trim() || `${row.title} 副本`;
@@ -440,6 +496,12 @@ router.post('/:id/attachments', requireAdmin, attachmentUpload.single('file'), (
     if (!ATTACHMENT_EXTENSIONS.has(ext)) {
       fs.rmSync(req.file.path, { force: true });
       return res.status(400).json({ error: '不支持的附件类型，请上传图片、zip/7z/rar/tar 压缩包、PDF、文本或 Office 文件' });
+    }
+    try {
+      assertProblemStorage(problemId, req.file.size || 0);
+    } catch (quotaErr) {
+      fs.rmSync(req.file.path, { force: true });
+      throw quotaErr;
     }
     const target = path.join(attachmentDir(problemId), filename);
     try {
@@ -584,6 +646,7 @@ router.post('/:id/cases/zip', requireAdmin, upload.single('file'), (req, res, ne
     const pairs = [...files.values()].filter((item) => item.input && item.output).sort((a, b) => compareNatural(a.rawStem, b.rawStem));
     const missing = [...files.values()].filter((item) => !item.input || !item.output).map((item) => item.rawStem);
     if (!pairs.length) return res.status(400).json({ error: 'zip 中没有识别到成对的 .in/.out 或 .in/.ans 测试数据' });
+    assertProblemStorage(problemId, totalUnzippedBytes, { replace });
 
     const dir = ensureProblemDir(problemId);
     const startSort = replace ? 1 : (db.prepare('SELECT COALESCE(MAX(sort), 0) + 1 AS s FROM problem_cases WHERE problem_id = ?').get(problemId).s || 1);
@@ -639,6 +702,9 @@ router.post('/:id/cases', requireAdmin, (req, res, next) => {
     if (!problem) return res.status(404).json({ error: '题目不存在' });
     const input = String(req.body.input ?? '');
     const output = String(req.body.output ?? '');
+    assertTextSize('测试输入', input, MANUAL_CASE_LIMIT_BYTES);
+    assertTextSize('测试输出', output, MANUAL_CASE_LIMIT_BYTES);
+    assertProblemStorage(problemId, bytesOf(input) + bytesOf(output));
     const subtask = sanitizeSubtaskName(req.body.subtask);
     const existingSubtaskScore = subtask ? subtaskScore(problemId, subtask) : 0;
     const requestedScore = caseScore(req.body.score);
@@ -719,8 +785,20 @@ router.put('/:id/cases/:caseId', requireAdmin, (req, res, next) => {
     const score = caseScore(req.body.score ?? (subtask ? existingGroupScore : row.score));
     const timeLimit = req.body.timeLimit === undefined ? (row.time_limit || 0) : caseTimeLimit(req.body.timeLimit);
     const memoryLimit = req.body.memoryLimit === undefined ? (row.memory_limit || 0) : caseMemoryLimit(req.body.memoryLimit);
-    if (req.body.input !== undefined) fs.writeFileSync(absoluteDataPath(row.input_path), String(req.body.input));
-    if (req.body.output !== undefined) fs.writeFileSync(absoluteDataPath(row.output_path), String(req.body.output));
+    const nextInput = req.body.input === undefined ? null : String(req.body.input);
+    const nextOutput = req.body.output === undefined ? null : String(req.body.output);
+    let storageDelta = 0;
+    if (nextInput !== null) {
+      assertTextSize('测试输入', nextInput, MANUAL_CASE_LIMIT_BYTES);
+      storageDelta += bytesOf(nextInput) - fileSizeSafe(absoluteDataPath(row.input_path));
+    }
+    if (nextOutput !== null) {
+      assertTextSize('测试输出', nextOutput, MANUAL_CASE_LIMIT_BYTES);
+      storageDelta += bytesOf(nextOutput) - fileSizeSafe(absoluteDataPath(row.output_path));
+    }
+    if (storageDelta > 0) assertProblemStorage(problemId, storageDelta);
+    if (nextInput !== null) fs.writeFileSync(absoluteDataPath(row.input_path), nextInput);
+    if (nextOutput !== null) fs.writeFileSync(absoluteDataPath(row.output_path), nextOutput);
     db.prepare('UPDATE problem_cases SET subtask = ?, score = ?, sort = ?, time_limit = ?, memory_limit = ? WHERE id = ?').run(subtask, subtask ? 0 : score, sort, timeLimit, memoryLimit, caseId);
     if (oldSubtask && oldSubtask !== subtask) rebalanceSubtaskScores(problemId, oldSubtask);
     if (subtask) rebalanceSubtaskScores(problemId, subtask, caseId, score);
@@ -764,6 +842,23 @@ router.post('/:id/submit', requireLogin, (req, res, next) => {
     if (!['cpp11', 'cpp14', 'cpp17', 'c', 'python'].includes(language)) return res.status(400).json({ error: '不支持的语言' });
     const optimize = ['cpp11', 'cpp14', 'cpp17'].includes(language) && (req.body.o2 === undefined ? true : parseBoolean(req.body.o2, true));
     if (!code.trim()) return res.status(400).json({ error: '代码不能为空' });
+    if (MAX_CODE_BYTES > 0 && bytesOf(code) > MAX_CODE_BYTES) {
+      return res.status(413).json({ error: `代码长度不能超过 ${Math.round(MAX_CODE_BYTES / 1024)} KB` });
+    }
+    const recentCount = db.prepare("SELECT COUNT(*) AS count FROM submissions WHERE user_id = ? AND created_at >= datetime('now', ?)")
+      .get(req.user.id, `-${SUBMIT_RATE_WINDOW_SECONDS} seconds`).count;
+    if (recentCount >= SUBMIT_RATE_LIMIT) {
+      return res.status(429).json({ error: `提交过于频繁，请稍后再试（${SUBMIT_RATE_WINDOW_SECONDS} 秒内最多 ${SUBMIT_RATE_LIMIT} 次）` });
+    }
+    const userActive = db.prepare("SELECT COUNT(*) AS count FROM submissions WHERE user_id = ? AND status IN ('Waiting', 'Judging')")
+      .get(req.user.id).count;
+    if (userActive >= MAX_PENDING_SUBMISSIONS_PER_USER) {
+      return res.status(429).json({ error: `你的评测队列任务过多，请等待已有提交完成后再提交` });
+    }
+    const queueActive = db.prepare("SELECT COUNT(*) AS count FROM submissions WHERE status IN ('Waiting', 'Judging')").get().count;
+    if (queueActive >= MAX_JUDGE_QUEUE) {
+      return res.status(429).json({ error: '评测队列繁忙，请稍后再提交' });
+    }
     const info = db.prepare(`INSERT INTO submissions (user_id, problem_id, language, code, optimize, status)
       VALUES (?, ?, ?, ?, ?, 'Waiting')`).run(req.user.id, problemId, language, code, boolToInt(optimize));
     res.json({ submissionId: info.lastInsertRowid });

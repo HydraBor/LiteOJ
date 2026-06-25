@@ -51,6 +51,7 @@
 - 子任务按整组计分，组内全部通过才得分。
 - 支持多选测试点整体拖拽。
 - 支持测试点单独时空限制。
+- 手动测试点、附件和单题总存储均有容量限制。
 
 ### 评测
 
@@ -59,6 +60,8 @@
 - C++ 默认 O2，非 C++ 不显示 O2。
 - TLE/MLE/OLE/RE/CE/System Error 都在 runner 中归一化。
 - SPJ checker 编译失败或运行系统错误会返回 System Error。
+- 评测任务只下发测试点元数据，输入输出按 case 拉取，避免大数据一次性进入 `/api/judge/acquire` JSON。
+- `Judging` 超时任务会自动回收为 `Waiting`，结果写回需要匹配当前 `judge_id` 锁。
 
 ### 初赛题库和模考
 
@@ -67,10 +70,12 @@
 - 模考可从试卷生成，提交后显示报告。
 - 统一标签系统使用 slug 作为唯一标识，中文名作为唯一展示名；导入和编程题选标签只接受固定表中的 slug。
 - 数据分析使用已录入题库计算 canonical 考点出现次数和加权分值。
+- 数据分析支持初赛/复赛场次筛选；复赛从 `CSPJ25T1` / `CSPS25T4` 这类公开编程题中统计 T1-T4 题位、难度和考点热力数据。
 
 ### 账号和安全
 
 - 登录/注册有基础限速。
+- 提交入口有限制：代码大小、提交频率、单用户待评测数和全局队列长度。
 - 密码使用 bcrypt。
 - Cookie 使用 `HttpOnly`、`SameSite=Lax`，HTTPS 下自动 `Secure`。
 - API 禁用缓存。
@@ -84,6 +89,7 @@
 - 宿主机 judge worker 调用 go-judge。
 - 国内镜像源、portable Node.js 和 go-judge 下载逻辑已保留。
 - SPJ 环境变量已同步到 `.env.example`、`scripts/deploy/env.sh`、`scripts/deploy/services.sh` 和 `docker-compose.yml`。
+- 评测锁超时和提交/上传配额环境变量已同步到 `.env.example`、`scripts/deploy/env.sh` 和 `docker-compose.yml`。
 - 部署文档补充了全量备份、恢复、清空 Docker 数据、只清空用户数据、只清空编程题库和只清空初赛题库的命令。
 
 ## 本次清理

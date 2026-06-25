@@ -24,7 +24,7 @@ LiteOJ app container
   - frontend static files
   - testdata / attachments / checker.cpp
   |
-  | /api/judge/acquire + /api/judge/:id/result
+  | /api/judge/acquire + /api/judge/cases/:caseId/:kind + /api/judge/:id/result
   v
 Host judge worker
   - polls pending submissions
@@ -86,6 +86,8 @@ LiteOJ 前端是无构建步骤的单页应用：
 
 `problems.tags_json` 和 `prelim_questions.tags_json` 仍保留为接口兼容缓存；查询、筛选和数据分析优先使用关系表。
 
+复赛题目无需单独建表，使用编程题库题号承载元数据：`CSPJ25T1` 表示 2025 年 CSP-J 复赛 T1，`CSPS25T4` 表示 2025 年 CSP-S 复赛 T4。复赛分析只统计公开题目。
+
 题目文件位于 `DATA_DIR/problems/<problemId>/`：
 
 ```text
@@ -114,12 +116,15 @@ checker.cpp        Special Judge 源文件
 1. 用户在题目页提交代码。
 2. 后端插入 `submissions`，状态为 `Waiting`。
 3. judge worker 领取任务并锁定为 `Judging`。
-4. go-judge 编译用户程序。
-5. 按测试点运行，超时立即返回 TLE。
-6. 标准题使用内置标准输出比较。
-7. SPJ 题在用户程序运行成功后调用 checker。
-8. runner 按测试点或子任务规则汇总分数。
-9. judge worker 写回结果。
+4. 后端只返回测试点元数据，输入和输出由 worker 按 case 拉取或从共享数据目录读取。
+5. go-judge 编译用户程序。
+6. 按测试点运行，超时立即返回 TLE。
+7. 标准题使用内置标准输出比较。
+8. SPJ 题在用户程序运行成功后调用 checker。
+9. runner 按测试点或子任务规则汇总分数。
+10. judge worker 写回结果；写回必须匹配当前 `judge_id` 锁，避免超时 worker 覆盖新结果。
+
+如果 worker 崩溃或网络中断，`Judging` 状态且 `locked_at` 超过 `JUDGE_LOCK_TIMEOUT_SECONDS` 的提交会在下一次领取任务时自动回收为 `Waiting`。
 
 ## 计分模型
 
@@ -162,7 +167,7 @@ testlib 中 `registerTestlibCmd(argc, argv)` 会据此初始化 `inf`、`ouf`、
 - `/api/submissions`：提交列表、详情和重测。
 - `/api/judge`：judge worker 内部接口。
 - `/api/prelim`：初赛题库、导入、模考。
-- `/api/analytics`：考点统计。
+- `/api/analytics`：初赛/复赛考点统计；初赛来自 `prelim_*`，复赛来自公开编程题库和复赛题号解析。
 - `/api/tags`：标签列表、大纲树和 slug 校验。
 
 具体接口清单见 README。
@@ -174,7 +179,8 @@ testlib 中 `registerTestlibCmd(argc, argv)` 会据此初始化 `inf`、`ouf`、
 - judge worker 通过 `JUDGE_TOKEN` 调用内部接口。
 - Cookie 使用 `HttpOnly`、`SameSite=Lax`，HTTPS 下自动 `Secure`。
 - 密码使用 bcrypt，保留一次性明文密码迁移兼容。
-- 上传测试数据限制 zip 大小和解压总量。
+- 提交入口限制代码大小、提交频率、单用户待评测数量和全局队列数量。
+- 上传测试数据限制 zip 大小和解压总量；手动测试点、附件和单题总存储也有限制。
 - `checker.cpp` 有源码大小限制，运行有独立时空限制。
 
 ## 参考资料

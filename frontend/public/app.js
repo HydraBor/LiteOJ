@@ -120,8 +120,11 @@ function markdownTableAlign(cell) {
 
 function tableCellAttrs(cell) {
   const attrs = [];
+  const classes = [];
   if (cell.rowspan > 1) attrs.push(`rowspan="${cell.rowspan}"`);
-  if (cell.align) attrs.push(`class="align-${esc(cell.align)}"`);
+  if (cell.align) classes.push(`align-${esc(cell.align)}`);
+  if (cell.colLast) classes.push('col-last');
+  if (classes.length) attrs.push(`class="${classes.join(' ')}"`);
   return attrs.length ? ` ${attrs.join(' ')}` : '';
 }
 
@@ -134,7 +137,7 @@ function renderMarkdownTable(lines = [], options = {}) {
   const alignments = hasAlign ? rows[1].map(markdownTableAlign) : [];
   const colCount = Math.max(head.length, alignments.length, ...body.map((row) => row.length));
   const pad = (row) => Array.from({ length: colCount }, (_v, index) => row[index] ?? '');
-  const headerHtml = pad(head).map((text, index) => `<th${tableCellAttrs({ align: alignments[index] || '', rowspan: 1 })}>${renderInlineMarkdown(text)}</th>`).join('');
+  const headerHtml = pad(head).map((text, index) => `<th${tableCellAttrs({ align: alignments[index] || '', rowspan: 1, colLast: index === colCount - 1 })}>${renderInlineMarkdown(text)}</th>`).join('');
   const anchors = Array(colCount).fill(null);
   const bodyRows = body.map((rawRow) => {
     const rendered = [];
@@ -143,7 +146,7 @@ function renderMarkdownTable(lines = [], options = {}) {
         anchors[index].rowspan += 1;
         return;
       }
-      const cell = { text, align: alignments[index] || '', rowspan: 1 };
+      const cell = { text, align: alignments[index] || '', rowspan: 1, colLast: index === colCount - 1 };
       anchors[index] = cell;
       rendered.push(cell);
     });
@@ -1455,17 +1458,21 @@ async function renderUserAdmin() {
       : `<button type="button" data-user-action="role" data-user-id="${esc(u.id)}" data-role="${u.role === 'admin' ? 'user' : 'admin'}">设为${u.role === 'admin' ? '普通用户' : '管理员'}</button>`;
     return `<tr><td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${esc(u.createdAt)}</td><td class="table-actions-cell"><div class="table-action-row">${roleAction}<button type="button" data-user-action="reset" data-user-id="${esc(u.id)}" data-username="${attrEsc(u.username)}">重置密码</button></div></td></tr>`;
   }).join('')}</tbody></table></div>`;
-  bindUserAdminActions();
 }
 
-function bindUserAdminActions() {
-  qsa('[data-user-action="role"]').forEach((btn) => {
-    btn.addEventListener('click', () => setUserRole(Number(btn.dataset.userId), btn.dataset.role || 'user'));
-  });
-  qsa('[data-user-action="reset"]').forEach((btn) => {
-    btn.addEventListener('click', () => resetUserPassword(Number(btn.dataset.userId), btn.dataset.username || ''));
-  });
+function handleUserAdminAction(event) {
+  const btn = event.target.closest('[data-user-action]');
+  if (!btn || !app.contains(btn)) return;
+  event.preventDefault();
+  const id = Number(btn.dataset.userId);
+  if (btn.dataset.userAction === 'role') {
+    window.setUserRole(id, btn.dataset.role || 'user');
+  }
+  if (btn.dataset.userAction === 'reset') {
+    window.resetUserPassword(id, decodeAttrValue(btn.dataset.username || ''));
+  }
 }
+app.addEventListener('click', handleUserAdminAction);
 window.setUserRole = async (id, role) => runUiAction(async () => {
   await api(`/api/admin/users/${id}/role`, { method: 'PATCH', body: { role } });
   renderUserAdmin();

@@ -3378,28 +3378,6 @@
       "sortOrder": 307
     },
     {
-      "slug": "run-length-encoding",
-      "nameZh": "行程长度编码",
-      "nameEn": "",
-      "parentSlug": "",
-      "level": "topic",
-      "nodeType": "knowledge",
-      "scope": "all",
-      "description": "",
-      "sortOrder": 308
-    },
-    {
-      "slug": "majority-vote",
-      "nameZh": "多数投票",
-      "nameEn": "",
-      "parentSlug": "",
-      "level": "topic",
-      "nodeType": "knowledge",
-      "scope": "all",
-      "description": "",
-      "sortOrder": 309
-    },
-    {
       "slug": "lcs",
       "nameZh": "最长公共子序列",
       "nameEn": "",
@@ -3408,7 +3386,7 @@
       "nodeType": "knowledge",
       "scope": "all",
       "description": "",
-      "sortOrder": 310
+      "sortOrder": 308
     },
     {
       "slug": "lis",
@@ -3419,7 +3397,7 @@
       "nodeType": "knowledge",
       "scope": "all",
       "description": "",
-      "sortOrder": 311
+      "sortOrder": 309
     },
     {
       "slug": "recurrence-sequence",
@@ -3430,7 +3408,7 @@
       "nodeType": "knowledge",
       "scope": "all",
       "description": "",
-      "sortOrder": 312
+      "sortOrder": 310
     },
     {
       "slug": "counting-principle",
@@ -3441,7 +3419,7 @@
       "nodeType": "knowledge",
       "scope": "all",
       "description": "",
-      "sortOrder": 313
+      "sortOrder": 311
     },
     {
       "slug": "modulo-operation",
@@ -3452,7 +3430,7 @@
       "nodeType": "knowledge",
       "scope": "all",
       "description": "",
-      "sortOrder": 314
+      "sortOrder": 312
     },
     {
       "slug": "rounding",
@@ -3463,7 +3441,7 @@
       "nodeType": "knowledge",
       "scope": "all",
       "description": "",
-      "sortOrder": 315
+      "sortOrder": 313
     },
     {
       "slug": "inverse-pair",
@@ -3474,7 +3452,7 @@
       "nodeType": "knowledge",
       "scope": "all",
       "description": "",
-      "sortOrder": 316
+      "sortOrder": 314
     },
     {
       "slug": "path-counting",
@@ -3485,7 +3463,7 @@
       "nodeType": "knowledge",
       "scope": "all",
       "description": "",
-      "sortOrder": 317
+      "sortOrder": 315
     },
     {
       "slug": "model-transformation",
@@ -3496,7 +3474,7 @@
       "nodeType": "knowledge",
       "scope": "all",
       "description": "",
-      "sortOrder": 318
+      "sortOrder": 316
     },
     {
       "slug": "prime-factorization",
@@ -3507,7 +3485,7 @@
       "nodeType": "knowledge",
       "scope": "all",
       "description": "",
-      "sortOrder": 319
+      "sortOrder": 317
     },
     {
       "slug": "factor-counting",
@@ -3518,7 +3496,7 @@
       "nodeType": "knowledge",
       "scope": "all",
       "description": "",
-      "sortOrder": 320
+      "sortOrder": 318
     },
     {
       "slug": "perfect-square",
@@ -3529,7 +3507,7 @@
       "nodeType": "knowledge",
       "scope": "all",
       "description": "",
-      "sortOrder": 321
+      "sortOrder": 319
     },
     {
       "slug": "expression-notation",
@@ -3540,7 +3518,7 @@
       "nodeType": "knowledge",
       "scope": "all",
       "description": "",
-      "sortOrder": 322
+      "sortOrder": 320
     },
     {
       "slug": "graph-degree",
@@ -3551,7 +3529,7 @@
       "nodeType": "knowledge",
       "scope": "all",
       "description": "",
-      "sortOrder": 323
+      "sortOrder": 321
     },
     {
       "slug": "graph-edge-count",
@@ -3562,7 +3540,7 @@
       "nodeType": "knowledge",
       "scope": "all",
       "description": "",
-      "sortOrder": 324
+      "sortOrder": 322
     },
     {
       "slug": "memory-size-calculation",
@@ -3573,7 +3551,18 @@
       "nodeType": "knowledge",
       "scope": "all",
       "description": "",
-      "sortOrder": 325
+      "sortOrder": 323
+    },
+    {
+      "slug": "thinking",
+      "nameZh": "思维",
+      "nameEn": "",
+      "parentSlug": "",
+      "level": "topic",
+      "nodeType": "knowledge",
+      "scope": "all",
+      "description": "",
+      "sortOrder": 324
     }
   ]
 }

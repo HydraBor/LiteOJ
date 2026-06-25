@@ -293,13 +293,14 @@ body.auth-page .container { max-width: 520px; margin-top: 56px; }
 .markdown .md-align-left { text-align: left; }
 .markdown .md-align-center { text-align: center; }
 .markdown .md-align-right { text-align: right; }
-.markdown .md-align-center .md-table { margin-left: auto; margin-right: auto; }
+.markdown .md-align-center > .md-table { width: auto; min-width: min(100%, 520px); max-width: 100%; margin-left: auto; margin-right: auto; }
+.markdown .md-align-center .md-table-wrap { display: flex; justify-content: center; }
+.markdown .md-align-center .md-table-wrap .md-table { width: auto; min-width: min(100%, 520px); max-width: 100%; }
 .markdown .md-table-wrap { margin: 12px 0 18px; overflow-x: auto; }
 .markdown .md-table-wrap .md-table { margin: 0; }
 .markdown .md-table { margin: 12px 0 18px; width: 100%; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .markdown .md-table th, .markdown .md-table td { padding: 9px 11px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); vertical-align: middle; }
-.markdown .md-table th:last-child, .markdown .md-table td:last-child { border-right: 0; }
-.markdown .md-table tr:last-child td { border-bottom: 0; }
+.markdown .md-table .col-last { border-right: 0; }
 .markdown .md-table .align-left { text-align: left; }
 .markdown .md-table .align-center { text-align: center; }
 .markdown .md-table .align-right { text-align: right; }

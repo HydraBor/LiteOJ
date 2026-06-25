@@ -42,7 +42,7 @@ function seedPrelimPapers() {
   function refreshExistingSeedPaper(paperId, parsed) {
     const updateGroup = db.prepare(`UPDATE prelim_groups
       SET title = ?, section_title = ?, stem = ?, code = ?, tags_json = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE paper_id = ? AND number = ?`);
+      WHERE paper_id = ? AND section = ? AND number = ?`);
     const updateQuestion = db.prepare(`UPDATE prelim_questions
       SET answer = ?, explanation = ?, tags_json = ?, score = ?, updated_at = CURRENT_TIMESTAMP
       WHERE paper_id = ? AND number = ?`);
@@ -56,6 +56,7 @@ function seedPrelimPapers() {
         group.code || '',
         JSON.stringify(groupTags),
         paperId,
+        group.section,
         group.number,
       );
       for (const question of group.questions || []) {

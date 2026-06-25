@@ -102,6 +102,29 @@ assert(parsedPrelim.groups.find((g) => g.section === 'single_choice').sectionTit
 assert(parsedPrelim.groups.find((g) => g.section === 'program_reading' && g.groupNo === '1').sectionTitle.includes('二、阅读程序'), 'program reading heading should be preserved');
 assert(parsedPrelim.groups.find((g) => g.section === 'code_completion' && g.groupNo === '1').title.includes('字符串解码'), 'completion group title should keep original subtitle');
 assert(parsedPrelim.questions.every((q) => q.tags && q.tags.length), 'each seed question should have tags');
+const expectedPrelimQuestionCounts = {
+  2019: 43,
+  2020: 43,
+  2021: 43,
+  2022: 44,
+  2023: 42,
+  2024: 42,
+  2025: 43,
+};
+for (const [year, count] of Object.entries(expectedPrelimQuestionCounts)) {
+  const paper = fs.readFileSync(path.join(__dirname, '..', 'seed', 'prelim', `${year}-CSP-J1.md`), 'utf8');
+  const solution = fs.readFileSync(path.join(__dirname, '..', 'seed', 'prelim', `${year}-CSP-J1-solution.md`), 'utf8');
+  const parsed = parsePaperQuestions(paper, solution, { year: Number(year), groupName: 'CSP-J' });
+  const sections = parsed.groups.reduce((acc, group) => {
+    acc[group.section] = (acc[group.section] || 0) + 1;
+    return acc;
+  }, {});
+  assert.strictEqual(parsed.questions.length, count, `${year} CSP-J1 question count should remain stable`);
+  assert.deepStrictEqual(sections, { single_choice: 15, program_reading: 3, code_completion: 2 }, `${year} CSP-J1 section grouping should remain stable`);
+}
+const tagSchema = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'seed', 'tag-schema.json'), 'utf8'));
+assert(tagSchema.tags.some((tag) => tag.slug === 'thinking' && tag.nameZh === '思维'), 'tag schema should include the latest imported thinking tag');
+assert(!tagSchema.tags.some((tag) => ['run-length-encoding', 'majority-vote'].includes(tag.slug)), 'tag schema should follow the latest provided tag standard');
 
 for (const year of [2019, 2020, 2021, 2022, 2023, 2024, 2025]) {
   const yPaper = fs.readFileSync(path.join(__dirname, '..', 'seed', 'prelim', `${year}-CSP-J1.md`), 'utf8');
@@ -184,6 +207,7 @@ assert(appJs.includes('window.startMockExam = async'), 'mock start handler shoul
 assert(appJs.includes('/logo-mark.svg'), 'auth page should use the SVG LiteOJ mark');
 assert(appJs.includes('async function renderProfile') && appJs.includes('/api/profile/password') && appJs.includes("path === '/profile'"), 'frontend should provide a profile page for password changes');
 assert(appJs.includes('resetUserPassword') && appJs.includes('/reset-password') && appJs.includes('123456'), 'user admin page should expose password reset to 123456');
+assert(appJs.includes('handleUserAdminAction') && appJs.includes("app.addEventListener('click', handleUserAdminAction)") && appJs.includes("decodeAttrValue(btn.dataset.username"), 'user admin actions should use stable delegated click handling');
 assert(appJs.includes("routeAnchor('/profile'"), 'logged-in user box should link to the profile page');
 assert(!appJs.includes('<h1>提交记录</h1>'), 'submissions page should not render a redundant page title');
 assert(appJs.includes('clearSubmissionPoll') && appJs.includes('location.pathname !== expectedPath'), 'submission polling should stop refreshing after the user leaves the submission page');
@@ -275,6 +299,7 @@ assert(initJs.includes("DEFAULT_ADMIN_USERNAME = 'admin'") && initJs.includes("D
 assert(initJs.includes('hashPassword(password)') && !initJs.includes('bcrypt.hashSync'), 'init should use centralized bcrypt password helpers');
 assert(initJs.includes('Admin seed skipped; existing admin user') && initJs.includes("UPDATE users SET role = 'admin'"), 'init should not reset existing admin passwords and should recover databases without an admin');
 assert(initJs.includes('ADMIN_PASSWORD must be at least 6 characters'), 'initial admin password should follow the shared minimum length rule');
+assert(initJs.includes('WHERE paper_id = ? AND section = ? AND number = ?'), 'prelim seed refresh should not overwrite groups from other sections with the same local number');
 assert(resetAdminJs.includes('existingTarget') && resetAdminJs.includes("UPDATE users SET password_hash = ?, role = 'admin'") && resetAdminJs.includes('existingAdmin'), 'admin reset should handle an existing target username before renaming another admin');
 
 const routes = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'problems.js'), 'utf8');
@@ -294,6 +319,7 @@ assert(appJs.includes('raw.replace(/\\\\\\\((.+?)\\\\\\\)/g') || appJs.includes(
 assert(appJs.includes('text.replace(/\\\\\\\[([\\s\\S]*?)\\\\\\\]/g') || appJs.includes('text.replace(/\\\\\[([\\s\\S]*?)\\\\\]/g'), 'markdown should support \\[...\\] display math');
 assert(!appJs.includes('readAsDataURL'), 'Markdown image upload must not inline base64 data URLs');
 assert(appJs.includes('isMarkdownTableAlignRow') && appJs.includes('rowspan=') && appJs.includes("String(text).trim() === '^'"), 'Markdown table renderer should support alignment rows and ^ vertical merges');
+assert(appJs.includes('colLast: index === colCount - 1') && appJs.includes("classes.push('col-last')"), 'Markdown table renderer should mark the logical last column so rowspans do not break borders');
 assert(appJs.includes('normalizeBrokenMarkdownLinks') && appJs.includes('cuteTableWrapperClass') && appJs.includes('md-align'), 'Markdown renderer should support split image links plus :::align and ::cute-table directives');
 assert(appJs.includes('data-md-attachment') && appJs.includes('insertAttachmentIntoEditor'), 'Markdown toolbar should upload non-image attachments and insert links');
 assert(appJs.includes('tag-search-input') && appJs.includes('tag-check-option') && appJs.includes('data-tag-search') && appJs.includes('type="checkbox" name="tags"'), 'problem editor should use searchable checkbox tag selection');
@@ -309,6 +335,7 @@ assert(styleCss.includes('-webkit-backdrop-filter: blur(16px); backdrop-filter: 
 assert(styleCss.includes('-webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);'), 'editor footer should include Safari backdrop-filter prefix');
 assert(styleCss.includes('.tag-check-list') && styleCss.includes('.tag-search-input') && styleCss.includes('.align-center'), 'stylesheet should support tag checkbox search and Markdown table alignment');
 assert(styleCss.includes('.md-align-center') && styleCss.includes('.md-cute-table'), 'stylesheet should support custom Markdown alignment and cute table rendering');
+assert(styleCss.includes('.md-table .col-last') && !styleCss.includes('.md-table th:last-child') && !styleCss.includes('.md-table tr:last-child td'), 'Markdown table borders should be based on logical columns and keep the closing bottom line');
 assert(appJs.includes('function enhanceFormAccessibility') && appJs.includes('ensureControlId') && appJs.includes('aria-label'), 'dynamic forms should be normalized with id/name/label accessibility helpers');
 
 assert(appJs.includes("routeLink('/admin/problem/new', '新增题目'"), 'admin new-problem entry should be a real link, not a fragile inline-only button');

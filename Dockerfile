@@ -46,6 +46,7 @@ RUN npm config set fetch-retries 5 \
 COPY . .
 RUN mkdir -p /app/data /app/.tmp && chown -R node:node /app/data /app/.tmp
 
+ENV HOST=0.0.0.0
 EXPOSE 3000
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "backend/server.js"]

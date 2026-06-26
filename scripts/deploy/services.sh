@@ -133,7 +133,7 @@ start_judge() {
   inner+=" JUDGE_TOKEN=$(quote "${JUDGE_TOKEN:-}")"
   inner+=" JUDGE_ID=$(quote "${JUDGE_ID:-same-server-judge-1}")"
   inner+=" JUDGE_POLL_INTERVAL_MS=$(quote "${JUDGE_POLL_INTERVAL_MS:-2000}")"
-  inner+=" JUDGE_MAX_OUTPUT_BYTES=$(quote "${JUDGE_MAX_OUTPUT_BYTES:-1048576}")"
+  inner+=" JUDGE_MAX_OUTPUT_BYTES=$(quote "${JUDGE_MAX_OUTPUT_BYTES:-16777216}")"
   inner+=" GO_JUDGE_URL=$(quote "${GO_JUDGE_URL:-http://127.0.0.1:${GO_JUDGE_PORT:-5050}}")"
   inner+=" GO_JUDGE_PROCESS_LIMIT=$(quote "${GO_JUDGE_PROCESS_LIMIT:-64}")"
   inner+=" SPJ_TIMEOUT_MS=$(quote "${SPJ_TIMEOUT_MS:-3000}")"

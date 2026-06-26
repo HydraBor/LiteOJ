@@ -149,6 +149,13 @@ async function main() {
 	  assert.strictEqual(upload.imported, 1, 'zip case upload should import one pair');
 	  cases = await request('GET', `/api/problems/${encodeURIComponent(problemId)}/cases?content=1`);
 	  assert.strictEqual(cases.cases[0].subtask, '子任务1', 'zip subtask mode should put imported cases into subtask 1');
+  const caseDownloadRes = await fetch(`http://127.0.0.1:${port}/api/problems/${encodeURIComponent(problemId)}/cases/download`, { headers: { Cookie: cookie } });
+  assert.strictEqual(caseDownloadRes.status, 200, 'all testdata should be downloadable as a zip');
+  const caseZip = new AdmZip(Buffer.from(await caseDownloadRes.arrayBuffer()));
+  assert(caseZip.getEntries().some((entry) => entry.entryName.endsWith('.in')), 'downloaded testdata zip should contain input files');
+  assert(caseZip.getEntries().some((entry) => entry.entryName.endsWith('.out')), 'downloaded testdata zip should contain output files');
+  const selectedDownloadRes = await fetch(`http://127.0.0.1:${port}/api/problems/${encodeURIComponent(problemId)}/cases/download?ids=${cases.cases[0].id}`, { headers: { Cookie: cookie } });
+  assert.strictEqual(selectedDownloadRes.status, 200, 'selected testdata should be downloadable as a zip');
 
   await request('POST', `/api/problems/${encodeURIComponent(problemId)}/status`, { isPublic: false });
   let publicList = await request('GET', '/api/problems');
@@ -160,6 +167,11 @@ async function main() {
 	  const cloned = await request('POST', `/api/problems/${encodeURIComponent(problemId)}/clone`, { id: cloneId });
 	  assert.strictEqual(cloned.problem.id, cloneId, 'clone should create requested string id');
 	  assert.strictEqual(cloned.problem.hasChecker, true, 'clone should copy checker.cpp');
+  const clonedCases = await request('GET', `/api/problems/${encodeURIComponent(cloneId)}/cases`);
+  const bulkDeleted = await request('DELETE', `/api/problems/${encodeURIComponent(cloneId)}/cases`, { ids: clonedCases.cases.map((item) => item.id) });
+  assert.strictEqual(bulkDeleted.deleted, clonedCases.cases.length, 'bulk case delete should remove selected cases');
+  const cloneCasesAfterDelete = await request('GET', `/api/problems/${encodeURIComponent(cloneId)}/cases`);
+  assert.strictEqual(cloneCasesAfterDelete.cases.length, 0, 'bulk deleted clone should have no cases left');
 
   const submission = await request('POST', `/api/problems/${encodeURIComponent(problemId)}/submit`, {
     language: 'cpp17',
@@ -214,10 +226,12 @@ async function main() {
   assert(prelimItems.items.length > 0, 'prelim item list should work');
   const mockPapers = await request('GET', '/api/prelim/mock/papers');
   assert(mockPapers.papers.length > 0, 'mock paper list should work');
+  assert(mockPapers.papers[0].title.includes('真题卷') && !mockPapers.papers[0].title.includes('模拟卷'), 'mock paper list should name source papers as true papers');
   const started = await request('POST', '/api/prelim/mock/start', { paperId: mockPapers.papers[0].id });
   assert(started.examId, 'mock start should create an exam');
   const exam = await request('GET', `/api/prelim/mock/exams/${started.examId}`);
   assert(exam.groups.length > 0, 'mock exam should load grouped questions');
+  assert(exam.exam.title.includes('真题卷') && !exam.exam.title.includes('模拟卷'), 'started mock exam should keep the true-paper title');
   const submitted = await request('POST', `/api/prelim/mock/exams/${started.examId}/submit`, { answers: {} });
   assert.strictEqual(submitted.examId, started.examId, 'mock submit should return report data');
   const report = await request('GET', `/api/prelim/mock/exams/${started.examId}/report`);

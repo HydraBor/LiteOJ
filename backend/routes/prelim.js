@@ -387,6 +387,21 @@ function latestMockForPaper(userId, paperId) {
   if (!userId) return null;
   return db.prepare('SELECT * FROM prelim_mock_exams WHERE user_id = ? AND source_paper_id = ? AND status = ? ORDER BY id DESC LIMIT 1').get(userId, paperId, 'submitted');
 }
+function truthPaperTitle(paper) {
+  const group = String(paper?.group_name || 'CSP-J');
+  return `CSP-${paper?.year || ''}-${group.endsWith('J') ? 'J1' : 'S1'}-真题卷`;
+}
+function displayMockExamTitle(exam) {
+  const title = String(exam?.title || '');
+  if (exam?.source_paper_id || title.includes('模拟卷') || title.includes('初赛模考') || title.includes('自动模考')) {
+    const paper = exam?.source_paper_id ? db.prepare('SELECT * FROM prelim_papers WHERE id = ?').get(exam.source_paper_id) : null;
+    if (paper) return truthPaperTitle(paper);
+    const groupName = normalizeGroupName(exam?.group_name || 'CSP-J');
+    if (exam?.year) return truthPaperTitle({ year: exam.year, group_name: groupName });
+    return title.replace(/模拟卷/g, '真题卷').replace(/初赛模考/g, '初赛真题卷').replace(/自动模考/g, '真题卷');
+  }
+  return title || 'CSP 初赛真题卷';
+}
 function scoreTotalForMock(paper, rawTotal) {
   const official = Number(paper?.total_score || 0);
   if (official > 0) return official;
@@ -410,7 +425,7 @@ router.get('/mock/papers', (req, res) => {
     const latest = latestMockForPaper(userId, p.id);
     return {
       id: p.id,
-      title: `CSP-${p.year}-${p.group_name.endsWith('J') ? 'J1' : 'S1'}-模拟卷`,
+      title: truthPaperTitle(p),
       paperTitle: p.title,
       year: p.year,
       groupName: p.group_name,
@@ -453,7 +468,7 @@ router.post('/mock/start', (req, res) => {
   if (!groupIds.length) return res.status(400).json({ error: '题库中暂无可组卷的初赛题目' });
   const scoreRow = db.prepare(`SELECT COALESCE(SUM(q.score), 0) AS total FROM prelim_questions q WHERE q.group_id IN (${groupIds.map(() => '?').join(',')})`).get(...groupIds);
   const totalScore = scoreTotalForMock(paper, scoreRow.total);
-  const title = req.body.title || (paper ? `${paper.group_name}-${paper.year}-初赛模考` : 'CSP 初赛自动模考');
+  const title = req.body.title || (paper ? truthPaperTitle(paper) : 'CSP 初赛真题卷');
   const info = db.prepare(`INSERT INTO prelim_mock_exams (user_id, title, year, group_name, source_paper_id, group_ids_json, total_score)
     VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
     req.user?.id || null,
@@ -478,7 +493,7 @@ function mockExamPayload(examId, includeAnswers = false) {
   return {
     exam: {
       id: exam.id,
-      title: exam.title,
+      title: displayMockExamTitle(exam),
       year: exam.year,
       groupName: exam.group_name,
       sourcePaperId: exam.source_paper_id,

@@ -6,6 +6,10 @@ const router = express.Router();
 
 router.get('/', requireLogin, (req, res) => {
   const isAdmin = req.user.role === 'admin';
+  const requestedLimit = Number(req.query.limit);
+  const requestedPage = Number(req.query.page);
+  const limit = [10, 20, 50, 100].includes(requestedLimit) ? requestedLimit : 20;
+  const rawPage = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
   const params = [];
   let where = '';
   if (!isAdmin) {
@@ -16,13 +20,17 @@ router.get('/', requireLogin, (req, res) => {
     where += where ? ' AND s.problem_id = ?' : 'WHERE s.problem_id = ?';
     params.push(String(req.query.problemId));
   }
+  const total = db.prepare(`SELECT COUNT(*) AS count FROM submissions s ${where}`).get(...params).count;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const page = Math.min(rawPage, totalPages);
+  const offset = (page - 1) * limit;
   const rows = db.prepare(`SELECT s.*, u.username, p.title AS problem_title
     FROM submissions s
     JOIN users u ON u.id = s.user_id
     JOIN problems p ON p.id = s.problem_id
     ${where}
-    ORDER BY s.id DESC LIMIT 100`).all(...params);
-  res.json({ submissions: rows.map((row) => {
+    ORDER BY s.id DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+  res.json({ total, page, pageSize: limit, submissions: rows.map((row) => {
     const s = submissionFromRow(row);
     if (!isAdmin && s.userId !== req.user.id) delete s.code;
     return s;

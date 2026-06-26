@@ -1,6 +1,6 @@
 # LiteOJ 架构说明
 
-更新时间：2026-06-19
+更新时间：2026-06-27
 
 ## 设计目标
 
@@ -39,6 +39,8 @@ go-judge container
 
 `start.sh` 默认启动 `app` 和 `go-judge` 两个容器，并在宿主机启动 judge worker。`docker-compose.yml` 仍保留 `container-judge` profile，便于可信本地环境全容器化运行。
 
+`start.sh backup`、`start.sh restore` 和 `start.sh data-volume` 由 `scripts/deploy/data.sh` 实现。脚本会优先读取 `liteoj-app` 实际挂载的 `/app/data` volume，避免恢复到错误数据卷。
+
 ## 后端模块
 
 - `backend/server.js`：Express 应用、静态资源、API 挂载、全局错误处理。
@@ -58,6 +60,8 @@ LiteOJ 前端是无构建步骤的单页应用：
 - `frontend/public/index.html`：页面壳和导航。
 - `frontend/public/app.js`：前端路由、API 调用、页面渲染和交互。
 - `frontend/public/style.css`：全站样式。
+
+编程题库、提交记录、初赛题库、初赛模考、后台题库和初赛题库管理都使用统一分页交互，默认每页 20 条，支持 10/20/50/100 条切换。提交记录由 `/api/submissions?limit=20&page=1` 进行后端分页，其余列表按现有筛选结果在前端切片渲染。
 
 主要页面：
 
@@ -109,7 +113,8 @@ checker.cpp        Special Judge 源文件
 3. 新题默认不公开。
 4. 创建成功后自动进入测试数据管理页。
 5. 管理员录入测试点、子任务、checker.cpp。
-6. 确认可评测后手动公开题目。
+6. 管理员可下载全部/所选测试点，也可批量删除所选测试点。
+7. 确认可评测后手动公开题目。
 
 ### 提交评测
 

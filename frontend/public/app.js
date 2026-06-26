@@ -277,12 +277,6 @@ function renderMarkdown(source) {
   return out.join('\n') || '<p class="muted">暂无内容</p>';
 }
 
-function updateMarkdownPreview(textarea, target) {
-  const input = typeof textarea === 'string' ? qs(textarea) : textarea;
-  const box = typeof target === 'string' ? qs(target) : target;
-  if (input && box) box.innerHTML = renderMarkdown(input.value || '');
-}
-
 function statusClass(status) { return String(status || '').split(' ')[0]; }
 
 function formatUtc8Time(value) {
@@ -406,16 +400,6 @@ function tagChips(tags = [], className = 'tag-chip') {
 function prelimTags(q) {
   return tagChips(q.tagNames || q.tags || []);
 }
-function prelimQuestionRow(q) {
-  return `<tr>
-    <td>${prelimStatusBadge(q)}</td>
-    <td>${routeAnchor(`/prelim/item/${q.groupId || q.id}`, prelimQuestionTitle(q), 'problem-title-link')}</td>
-    <td class="prelim-type-cell"><span class="prelim-type-chip">${esc(prelimSectionLabel(q.section))}</span><div class="muted small">${esc(prelimTypeLabel(q.questionType))}${q.groupNo ? ` · 第 ${esc(q.groupNo)} 组` : ''}</div></td>
-    <td>${prelimTags(q)}</td>
-    <td>${esc(String(q.score || 0))}</td>
-    <td>${prelimAccuracy(q)}</td>
-  </tr>`;
-}
 function prelimOptionButton(option) {
   return `<button type="button" class="prelim-option" data-answer="${esc(option.key)}"><span class="option-key">${esc(option.key === 'T' ? '√' : option.key === 'F' ? '×' : option.key)}</span><span class="option-text">${renderInlineMarkdown(option.text || '')}</span></button>`;
 }
@@ -427,6 +411,12 @@ function formatScore(value) {
   const n = Number(value || 0);
   if (!Number.isFinite(n)) return '0';
   return Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10);
+}
+function formatMemoryKb(value) {
+  const kb = Number(value || 0);
+  if (!Number.isFinite(kb) || kb <= 0) return '--';
+  if (kb >= 1024) return `${Math.round(kb * 10 / 1024) / 10} MB`;
+  return `${Math.ceil(kb)} KB`;
 }
 function shouldShowPrelimGroupStem(item) {
   return item && item.section !== 'single_choice' && String(item.stem || '').trim();
@@ -509,6 +499,91 @@ function selectedFilterParams(params, keys) {
   const q = new URLSearchParams();
   for (const k of keys) if (params.get(k)) q.set(k, params.get(k));
   return q;
+}
+const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+function paginationKeys(options = {}) {
+  return {
+    pageKey: options.pageKey || 'page',
+    sizeKey: options.sizeKey || 'pageSize',
+  };
+}
+function pageSizeFromParams(params, options = {}) {
+  const { sizeKey } = paginationKeys(options);
+  const value = Number(params.get(sizeKey));
+  return PAGE_SIZE_OPTIONS.includes(value) ? value : DEFAULT_PAGE_SIZE;
+}
+function pageFromParams(params, options = {}) {
+  const { pageKey } = paginationKeys(options);
+  const value = Number(params.get(pageKey));
+  return Number.isInteger(value) && value > 0 ? value : 1;
+}
+function paginateItems(items = [], params = new URLSearchParams(), options = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const pageSize = pageSizeFromParams(params, options);
+  const total = list.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(pageFromParams(params, options), totalPages);
+  const start = total ? (page - 1) * pageSize : 0;
+  const end = Math.min(start + pageSize, total);
+  return { items: list.slice(start, end), total, totalPages, page, pageSize, start, end };
+}
+function serverPageData(items = [], total = 0, page = 1, pageSize = DEFAULT_PAGE_SIZE) {
+  const safeItems = Array.isArray(items) ? items : [];
+  const safeTotal = Math.max(0, Number(total) || 0);
+  const safeSize = PAGE_SIZE_OPTIONS.includes(Number(pageSize)) ? Number(pageSize) : DEFAULT_PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(safeTotal / safeSize));
+  const safePage = Math.min(Math.max(1, Number(page) || 1), totalPages);
+  const start = safeTotal ? (safePage - 1) * safeSize : 0;
+  const end = Math.min(start + safeItems.length, safeTotal);
+  return { items: safeItems, total: safeTotal, totalPages, page: safePage, pageSize: safeSize, start, end };
+}
+function setPreservedPageSize(target, params, options = {}) {
+  const { sizeKey } = paginationKeys(options);
+  const size = pageSizeFromParams(params, options);
+  if (size !== DEFAULT_PAGE_SIZE) target.set(sizeKey, String(size));
+}
+function paginationPath(basePath, params, page, pageSize, options = {}) {
+  const { pageKey, sizeKey } = paginationKeys(options);
+  const q = new URLSearchParams(params);
+  if (page > 1) q.set(pageKey, String(page));
+  else q.delete(pageKey);
+  if (pageSize !== DEFAULT_PAGE_SIZE) q.set(sizeKey, String(pageSize));
+  else q.delete(sizeKey);
+  const query = q.toString();
+  return `${basePath}${query ? `?${query}` : ''}`;
+}
+function paginationNumbers(page, totalPages) {
+  if (totalPages <= 7) return Array.from({ length: totalPages }, (_v, i) => i + 1);
+  const shown = new Set([1, totalPages, page, page - 1, page + 1].filter((x) => x >= 1 && x <= totalPages));
+  const numbers = [...shown].sort((a, b) => a - b);
+  return numbers.flatMap((n, i) => (i && n - numbers[i - 1] > 1 ? ['ellipsis', n] : [n]));
+}
+function renderPagination(basePath, params, pageData, unit = '条', options = {}) {
+  if (!pageData || pageData.total <= 0) return `<div class="pagination-bar pagination-empty"><span>共 0 ${esc(unit)}</span></div>`;
+  const { page, pageSize, totalPages, total, start, end } = pageData;
+  const prev = page > 1
+    ? routeAnchor(paginationPath(basePath, params, page - 1, pageSize, options), '上一页', 'pagination-btn')
+    : '<span class="pagination-btn disabled" aria-disabled="true">上一页</span>';
+  const next = page < totalPages
+    ? routeAnchor(paginationPath(basePath, params, page + 1, pageSize, options), '下一页', 'pagination-btn')
+    : '<span class="pagination-btn disabled" aria-disabled="true">下一页</span>';
+  const pages = paginationNumbers(page, totalPages).map((n) => {
+    if (n === 'ellipsis') return '<span class="pagination-ellipsis">...</span>';
+    if (n === page) return `<span class="pagination-btn current" aria-current="page">${n}</span>`;
+    return routeAnchor(paginationPath(basePath, params, n, pageSize, options), String(n), 'pagination-btn');
+  }).join('');
+  const { pageKey, sizeKey } = paginationKeys(options);
+  const sizeSelect = `<label class="page-size-control">每页
+    <select class="page-size-select" data-page-size-base="${esc(basePath)}" data-page-key="${esc(pageKey)}" data-size-key="${esc(sizeKey)}">
+      ${PAGE_SIZE_OPTIONS.map((size) => `<option value="${size}" ${pageSize === size ? 'selected' : ''}>${size} 条</option>`).join('')}
+    </select>
+  </label>`;
+  return `<div class="pagination-bar">
+    <div class="pagination-summary">显示 ${start + 1}-${end} / 共 ${total} ${esc(unit)}</div>
+    <nav class="pagination-nav" aria-label="分页">${prev}${pages}${next}</nav>
+    ${sizeSelect}
+  </div>`;
 }
 function setActiveNav() {
   qsa('.main-nav [data-nav]').forEach((btn) => btn.classList.remove('active'));
@@ -594,6 +669,20 @@ document.addEventListener('click', (event) => {
   if (!path || /^(https?:|mailto:)/i.test(path) || routeEl.target) return;
   event.preventDefault();
   nav(path);
+});
+document.addEventListener('change', (event) => {
+  const select = event.target.closest('.page-size-select');
+  if (!select) return;
+  const size = Number(select.value);
+  const basePath = select.dataset.pageSizeBase || location.pathname;
+  const pageKey = select.dataset.pageKey || 'page';
+  const sizeKey = select.dataset.sizeKey || 'pageSize';
+  const params = new URLSearchParams(location.search);
+  params.delete(pageKey);
+  if (size !== DEFAULT_PAGE_SIZE) params.set(sizeKey, String(size));
+  else params.delete(sizeKey);
+  const query = params.toString();
+  nav(`${basePath}${query ? `?${query}` : ''}`);
 });
 window.addEventListener('popstate', () => {
   clearSubmissionPoll();
@@ -748,12 +837,12 @@ function publicProblemRow(p) {
 function manageProblemRow(p) {
   return `<tr>
     <td><input type="checkbox" class="problem-check" value="${esc(p.id)}"></td>
-    <td>${problemVisibilityBadge(p)}<div class="muted small">数据 ${p.caseCount || 0} 组</div></td>
+    <td class="problem-state-cell">${problemVisibilityBadge(p)}<div class="muted small nowrap problem-case-count">数据 ${p.caseCount || 0} 组</div></td>
     <td>${routeAnchor(`/problem/${problemUrl(p.id)}`, `${p.id}. ${p.title}`, 'problem-title-link')}</td>
     <td>${tagChips(p.tags || [])}</td>
     <td>${difficultyBadge(p.difficulty)}</td>
     <td>${acceptanceText(p)}<div class="muted small">${p.acCount || 0}/${p.submitCount || 0}</div></td>
-    <td class="table-actions-cell">
+    <td class="table-actions-cell manage-actions-cell">
       <div class="table-action-row" aria-label="题目操作">
         ${routeLink(`/admin/problem/${problemUrl(p.id)}/edit`, '编辑', 'btn table-link-btn')}
         ${routeLink(`/admin/problem/${problemUrl(p.id)}/data`, '数据', 'btn table-link-btn')}
@@ -774,6 +863,7 @@ async function renderProblems() {
     api('/api/problems' + (query.toString() ? `?${query}` : '')),
     api('/api/problems/facets'),
   ]);
+  const pageData = paginateItems(data.problems || [], params);
   app.innerHTML = `
     <div class="card filter-panel-card">
       <form id="problemFilter" class="filter-panel-grid problem-filter-grid">
@@ -787,15 +877,16 @@ async function renderProblems() {
     <div class="card table-card problemset-table">
       <table>
         <thead><tr><th>状态</th><th>标题</th><th>知识点</th><th>难度</th><th>通过率</th></tr></thead>
-        <tbody>${data.problems.length ? data.problems.map(publicProblemRow).join('') : `<tr><td colspan="5" class="muted">暂无题目</td></tr>`}</tbody>
+        <tbody>${pageData.items.length ? pageData.items.map(publicProblemRow).join('') : `<tr><td colspan="5" class="muted">暂无题目</td></tr>`}</tbody>
       </table>
-      <div class="table-footer">共 ${data.problems.length} 条</div>
+      ${renderPagination('/problems', params, pageData, '道题')}
     </div>`;
   qs('#problemFilter').onsubmit = (e) => {
     e.preventDefault();
     const f = formData(e.target);
     const q = new URLSearchParams();
     for (const k of keys) if (f[k]) q.set(k, f[k]);
+    setPreservedPageSize(q, params);
     nav('/problems' + (q.toString() ? `?${q}` : ''));
   };
 }
@@ -1002,7 +1093,13 @@ function renderCaseOverview(problemId, problem, cases = [], subtaskMode = false)
       <p class="muted">${subtaskMode ? '同一子任务内全部测试点通过时，才获得该子任务分值。测试点可拖进不同子任务并按位置重排。' : '每个测试点独立计分，可直接编辑分值、时间限制和内存限制。'}</p>
     </div>
     ${subtaskMode ? renderSubtaskCaseList(problemId, problem, cases) : renderPlainCaseList(problemId, problem, cases)}
-    <div class="case-layout-actions"><button type="button" id="saveCaseLayoutBtn" class="primary">保存测试点配置</button><span id="caseLayoutMsg"></span></div>
+    <div class="case-layout-actions">
+      <button type="button" id="downloadAllCasesBtn">下载全部测试点</button>
+      <button type="button" id="downloadSelectedCasesBtn">下载所选</button>
+      <button type="button" id="deleteSelectedCasesBtn" class="danger">删除所选</button>
+      <button type="button" id="saveCaseLayoutBtn" class="primary">保存测试点配置</button>
+      <span id="caseLayoutMsg"></span>
+    </div>
   </div>`;
 }
 
@@ -1184,6 +1281,38 @@ function collectCaseLayout(subtaskMode) {
   }));
 }
 
+function selectedCaseIds() {
+  return qsa('#caseOverviewMount .case-data-row')
+    .filter((row) => qs('.case-select input', row)?.checked)
+    .map((row) => Number(row.dataset.caseId))
+    .filter((id) => Number.isInteger(id) && id > 0);
+}
+
+function triggerDownload(url) {
+  const link = document.createElement('a');
+  link.href = url;
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function downloadCaseZip(problemId, ids = []) {
+  const query = ids.length ? `?ids=${ids.map((id) => encodeURIComponent(String(id))).join(',')}` : '';
+  triggerDownload(problemApi(problemId, `/cases/download${query}`));
+}
+
+async function deleteSelectedCases(problemId) {
+  const ids = selectedCaseIds();
+  if (!ids.length) {
+    alert('请先选择要删除的测试点。');
+    return;
+  }
+  if (!confirm(`确认删除选中的 ${ids.length} 个测试点？此操作会同时删除对应输入/输出文件。`)) return;
+  await api(problemApi(problemId, '/cases'), { method: 'DELETE', body: { ids } });
+  nav(`/admin/problem/${problemUrl(problemId)}/data`);
+}
+
 function bindCaseOverviewActions(problemId) {
   bindCaseDragAndDrop(qs('#caseOverviewMount') || document);
   qsa('.case-select-all').forEach((input) => {
@@ -1209,6 +1338,25 @@ function bindCaseOverviewActions(problemId) {
     btn.dataset.bound = '1';
     btn.addEventListener('click', () => deleteCase(btn.dataset.problemId || problemId, btn.dataset.caseId));
   });
+  const downloadAllBtn = qs('#downloadAllCasesBtn');
+  if (downloadAllBtn && downloadAllBtn.dataset.bound !== '1') {
+    downloadAllBtn.dataset.bound = '1';
+    downloadAllBtn.addEventListener('click', () => downloadCaseZip(problemId));
+  }
+  const downloadSelectedBtn = qs('#downloadSelectedCasesBtn');
+  if (downloadSelectedBtn && downloadSelectedBtn.dataset.bound !== '1') {
+    downloadSelectedBtn.dataset.bound = '1';
+    downloadSelectedBtn.addEventListener('click', () => {
+      const ids = selectedCaseIds();
+      if (!ids.length) return alert('请先选择要下载的测试点。');
+      downloadCaseZip(problemId, ids);
+    });
+  }
+  const deleteSelectedBtn = qs('#deleteSelectedCasesBtn');
+  if (deleteSelectedBtn && deleteSelectedBtn.dataset.bound !== '1') {
+    deleteSelectedBtn.dataset.bound = '1';
+    deleteSelectedBtn.addEventListener('click', () => deleteSelectedCases(problemId).catch((err) => alert(err.message || String(err))));
+  }
   updateCaseSelectionHeaders();
 }
 
@@ -1333,17 +1481,24 @@ function bindCaseManagerInteractions(problemId, problem, cases, initialSubtaskMo
 
 async function renderSubmissions() {
   setImmersive(false);
-  const data = await api('/api/submissions');
+  const params = new URLSearchParams(location.search);
+  const pageSize = pageSizeFromParams(params);
+  const page = pageFromParams(params);
+  const query = selectedFilterParams(params, ['problemId']);
+  query.set('limit', String(pageSize));
+  query.set('page', String(page));
+  const data = await api('/api/submissions' + (query.toString() ? `?${query}` : ''));
+  const pageData = serverPageData(data.submissions || [], data.total ?? (data.submissions || []).length, data.page || page, data.pageSize || pageSize);
   app.innerHTML = `<div class="card table-card"><table>
-    <thead><tr><th>ID</th><th>题目</th><th>用户</th><th>语言</th><th>状态</th><th>分数</th><th>时间</th><th>提交时间</th></tr></thead>
-    <tbody>${data.submissions.map((s) => `<tr>
+    <thead><tr><th>ID</th><th>题目</th><th>用户</th><th>语言</th><th>状态</th><th>分数</th><th>时间</th><th>内存</th><th>提交时间</th></tr></thead>
+    <tbody>${pageData.items.length ? pageData.items.map((s) => `<tr>
       <td>${routeAnchor(`/submission/${s.id}`, `#${s.id}`)}</td>
       <td>${esc(s.problemId)} ${esc(s.problemTitle)}</td>
       <td>${esc(s.username)}</td>
       <td>${languageLabel(s.language)}</td>
       <td><span class="status ${statusClass(s.status)}">${esc(s.status)}</span></td>
-      <td>${s.score}</td><td>${s.timeMs} ms</td><td>${esc(formatUtc8Time(s.createdAt))}</td>
-    </tr>`).join('')}</tbody></table></div>`;
+      <td>${s.score}</td><td>${s.timeMs} ms</td><td>${formatMemoryKb(s.memoryKb)}</td><td>${esc(formatUtc8Time(s.createdAt))}</td>
+    </tr>`).join('') : '<tr><td colspan="9" class="muted">暂无提交记录</td></tr>'}</tbody></table>${renderPagination('/submissions', params, pageData, '条提交')}</div>`;
 }
 
 async function renderSubmission(id) {
@@ -1353,8 +1508,8 @@ async function renderSubmission(id) {
   app.innerHTML = `
     <div class="card">
       <div class="row space"><h1>提交 #${s.id}</h1><button onclick="rejudge(${s.id})">重新评测</button></div>
-      <p>题目：${esc(s.problemId)} ${esc(s.problemTitle)}　用户：${esc(s.username)}　语言：${languageLabel(s.language)}　O2优化：${s.optimize ? '开启' : '关闭'}</p>
-      <p>状态：<span class="status ${statusClass(s.status)}">${esc(s.status)}</span>　分数：${s.score}　时间：${s.timeMs} ms　提交时间：${esc(formatUtc8Time(s.createdAt))}</p>
+      <p>题目：${routeAnchor(`/problem/${problemUrl(s.problemId)}`, `${s.problemId} ${s.problemTitle}`, 'problem-title-link')}　用户：${esc(s.username)}　语言：${languageLabel(s.language)}　O2优化：${s.optimize ? '开启' : '关闭'}</p>
+      <p>状态：<span class="status ${statusClass(s.status)}">${esc(s.status)}</span>　分数：${s.score}　时间：${s.timeMs} ms　内存：${formatMemoryKb(s.memoryKb)}　提交时间：${esc(formatUtc8Time(s.createdAt))}</p>
       ${s.message ? `<pre>${esc(s.message)}</pre>` : ''}
       <h3>测试点详情</h3>
       ${renderDetails(s.details || [])}
@@ -1369,8 +1524,8 @@ window.rejudge = async (id) => {
 
 function renderDetails(details) {
   if (!details.length) return '<p class="muted">暂无测试点详情。</p>';
-  return `<table><thead><tr><th>#</th><th>子任务</th><th>状态</th><th>分数</th><th>时间</th><th>信息</th></tr></thead><tbody>${details.map((d) => `
-    <tr><td>${d.sort}</td><td>${d.subtask ? esc(d.subtask) : '<span class="muted">--</span>'}</td><td><span class="status ${statusClass(d.status)}">${esc(d.status)}</span></td><td>${d.score}</td><td>${d.timeMs} ms</td><td>${esc(d.message || '')}</td></tr>`).join('')}</tbody></table>`;
+  return `<table><thead><tr><th>#</th><th>子任务</th><th>状态</th><th>分数</th><th>时间</th><th>内存</th><th>信息</th></tr></thead><tbody>${details.map((d) => `
+    <tr><td>${d.sort}</td><td>${d.subtask ? esc(d.subtask) : '<span class="muted">--</span>'}</td><td><span class="status ${statusClass(d.status)}">${esc(d.status)}</span></td><td>${d.score}</td><td>${d.timeMs} ms</td><td>${formatMemoryKb(d.memoryKb)}</td><td>${esc(d.message || '')}</td></tr>`).join('')}</tbody></table>`;
 }
 
 
@@ -1456,7 +1611,7 @@ async function renderUserAdmin() {
     const roleAction = u.id === currentUser.id
       ? '<span class="muted">当前用户</span>'
       : `<button type="button" data-user-action="role" data-user-id="${esc(u.id)}" data-role="${u.role === 'admin' ? 'user' : 'admin'}">设为${u.role === 'admin' ? '普通用户' : '管理员'}</button>`;
-    return `<tr><td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${esc(u.createdAt)}</td><td class="table-actions-cell"><div class="table-action-row">${roleAction}<button type="button" data-user-action="reset" data-user-id="${esc(u.id)}" data-username="${attrEsc(u.username)}">重置密码</button></div></td></tr>`;
+    return `<tr><td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${esc(formatUtc8Time(u.createdAt))}</td><td class="table-actions-cell"><div class="table-action-row">${roleAction}<button type="button" data-user-action="reset" data-user-id="${esc(u.id)}" data-username="${attrEsc(u.username)}">重置密码</button></div></td></tr>`;
   }).join('')}</tbody></table></div>`;
 }
 
@@ -1495,6 +1650,7 @@ async function renderProblemManage() {
     api('/api/problems' + (query.toString() ? `?${query}` : '')),
     api('/api/problems/facets?all=1'),
   ]);
+  const pageData = paginateItems(data.problems || [], params);
   app.innerHTML = `<div class="manage-layout-head"><div><h1>编程题库管理</h1></div><div class="row button-row">${routeLink('/admin/problem/new', '新增题目', 'btn primary')}${routeLink('/admin', '返回后台', 'btn')}</div></div>
   <div class="card filter-panel-card"><form id="problemManageFilter" class="filter-panel-grid manage-problem-filter-grid">
     <label class="filter-keyword">关键词<input name="keyword" placeholder="题号 / 标题 / 题面" value="${esc(params.get('keyword') || '')}" /></label>
@@ -1505,12 +1661,13 @@ async function renderProblemManage() {
     <div class="filter-actions"><button class="primary">筛选</button><button type="button" class="reset-btn" onclick="nav('/admin/problems')">重置</button></div>
   </form></div>
   <div class="card batch-bar"><label class="checkbox-line"><input type="checkbox" id="checkAllProblems" /> 全选</label><button onclick="batchProblemManage('publish')">批量公开</button><button onclick="batchProblemManage('hide')">批量隐藏</button><button class="danger" onclick="batchProblemManage('delete')">批量删除</button></div>
-  <div class="card table-card problemset-table"><table><thead><tr><th></th><th>状态</th><th>标题</th><th>知识点</th><th>难度</th><th>通过率</th><th>操作</th></tr></thead><tbody>${data.problems.length ? data.problems.map(manageProblemRow).join('') : '<tr><td colspan="7" class="muted">暂无题目</td></tr>'}</tbody></table><div class="table-footer">共 ${data.problems.length} 条</div></div>`;
+  <div class="card table-card problemset-table manage-problem-table"><table><thead><tr><th></th><th>状态</th><th>标题</th><th>知识点</th><th>难度</th><th>通过率</th><th>操作</th></tr></thead><tbody>${pageData.items.length ? pageData.items.map(manageProblemRow).join('') : '<tr><td colspan="7" class="muted">暂无题目</td></tr>'}</tbody></table>${renderPagination('/admin/problems', params, pageData, '道题')}</div>`;
   qs('#problemManageFilter').onsubmit = (e) => {
     e.preventDefault();
     const f = formData(e.target);
     const q = new URLSearchParams();
     for (const k of keys) if (f[k]) q.set(k, f[k]);
+    setPreservedPageSize(q, params);
     nav('/admin/problems' + (q.toString() ? `?${q}` : ''));
   };
   qs('#checkAllProblems')?.addEventListener('change', (e) => qsa('.problem-check').forEach((x) => { x.checked = e.target.checked; }));
@@ -1552,6 +1709,7 @@ async function renderPrelimList() {
     api('/api/prelim/items' + (query.toString() ? `?${query}` : '')),
     api('/api/prelim/facets'),
   ]);
+  const pageData = paginateItems(data.items || [], params);
   app.innerHTML = `
     <div class="card filter-panel-card prelim-filter-card">
       <form id="prelimFilter" class="filter-panel-grid prelim-filter-grid compact-prelim-filter">
@@ -1567,15 +1725,16 @@ async function renderPrelimList() {
     <div class="card table-card problemset-table prelim-table">
       <table>
         <thead><tr><th>状态</th><th>题目</th><th>题型</th><th>知识点</th><th>分值</th><th>正确率</th></tr></thead>
-        <tbody>${(data.items || []).length ? data.items.map(prelimItemRow).join('') : `<tr><td colspan="6" class="muted">暂无初赛题目</td></tr>`}</tbody>
+        <tbody>${pageData.items.length ? pageData.items.map(prelimItemRow).join('') : `<tr><td colspan="6" class="muted">暂无初赛题目</td></tr>`}</tbody>
       </table>
-      <div class="table-footer">共 ${(data.items || []).length} 条</div>
+      ${renderPagination('/prelim', params, pageData, '道整题')}
     </div>`;
   qs('#prelimFilter').onsubmit = (e) => {
     e.preventDefault();
     const f = formData(e.target);
     const q = new URLSearchParams();
     for (const k of keys) if (f[k]) q.set(k, f[k]);
+    setPreservedPageSize(q, params);
     nav('/prelim' + (q.toString() ? `?${q}` : ''));
   };
 }
@@ -1662,22 +1821,27 @@ async function renderPrelimPaper(id) {
 async function renderPrelimAdmin() {
   setImmersive(false);
   if (currentUser?.role !== 'admin') return renderLogin();
-  const [papers, items, questions] = await Promise.all([
+  const params = new URLSearchParams(location.search);
+  const [papers, items] = await Promise.all([
     api('/api/prelim/papers'),
     api('/api/prelim/items?all=1'),
-    api('/api/prelim/questions?all=1'),
   ]);
+  const paperRows = papers.papers || [];
+  const itemRows = items.items || [];
+  const paperPage = paginateItems(paperRows, params, { pageKey: 'paperPage', sizeKey: 'paperPageSize' });
+  const itemPage = paginateItems(itemRows, params, { pageKey: 'itemPage', sizeKey: 'itemPageSize' });
+  const questionTotal = paperRows.reduce((sum, paper) => sum + Number(paper.questionCount || 0), 0);
   app.innerHTML = `<div class="manage-layout-head admin-clean-head">
     <div><h1>初赛题库管理</h1></div>
     <div class="row button-row"><button class="primary" onclick="nav('/admin/prelim/import')">导入试卷</button><button onclick="nav('/admin')">返回后台</button></div>
   </div>
   <div class="admin-stat-strip prelim-admin-stats">
-    <div><b>${papers.papers.length}</b><span>试卷</span></div>
-    <div><b>${items.items.length}</b><span>整题</span></div>
-    <div><b>${questions.questions.length}</b><span>小题</span></div>
+    <div><b>${paperRows.length}</b><span>试卷</span></div>
+    <div><b>${itemRows.length}</b><span>整题</span></div>
+    <div><b>${questionTotal}</b><span>小题</span></div>
   </div>
-  <div class="card table-card"><div class="table-headline"><h2>试卷列表</h2></div><table><thead><tr><th>年份</th><th>组别</th><th>标题</th><th>题量</th><th>操作</th></tr></thead><tbody>${papers.papers.map((p) => `<tr><td>${p.year}</td><td>${esc(p.groupName)}</td><td>${esc(p.title)}</td><td>${p.groupCount || 0} 整题 / ${p.questionCount || 0} 小题</td><td class="table-actions-cell"><div class="table-action-row"><button type="button" onclick="nav('/prelim/paper/${p.id}')">查看</button><button type="button" class="danger" onclick="deletePrelimPaper(${p.id})">删除</button></div></td></tr>`).join('') || '<tr><td colspan="5" class="muted">暂无试卷</td></tr>'}</tbody></table></div>
-  <div class="card table-card"><div class="table-headline"><h2>整题概览</h2><span class="muted small">最多显示前 200 条</span></div><table><thead><tr><th>题目</th><th>题型</th><th>知识点</th><th>小题数</th><th>正确率</th></tr></thead><tbody>${items.items.slice(0, 200).map((item) => `<tr><td>${routeAnchor(`/prelim/item/${item.id}`, prelimItemTitle(item))}</td><td>${esc(prelimSectionLabel(item.section))}</td><td>${prelimTags(item)}</td><td>${item.questionCount}</td><td>${prelimItemAccuracy(item)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">暂无题目</td></tr>'}</tbody></table></div>`;
+  <div class="card table-card prelim-admin-table"><div class="table-headline"><h2>试卷列表</h2></div><table><thead><tr><th>年份</th><th>组别</th><th>标题</th><th>题量</th><th>操作</th></tr></thead><tbody>${paperPage.items.map((p) => `<tr><td>${p.year}</td><td>${esc(p.groupName)}</td><td class="prelim-admin-title-cell">${esc(p.title)}</td><td class="nowrap">${p.groupCount || 0} 整题 / ${p.questionCount || 0} 小题</td><td class="table-actions-cell"><div class="table-action-row"><button type="button" onclick="nav('/prelim/paper/${p.id}')">查看</button><button type="button" class="danger" onclick="deletePrelimPaper(${p.id})">删除</button></div></td></tr>`).join('') || '<tr><td colspan="5" class="muted">暂无试卷</td></tr>'}</tbody></table>${renderPagination('/admin/prelim', params, paperPage, '套试卷', { pageKey: 'paperPage', sizeKey: 'paperPageSize' })}</div>
+  <div class="card table-card prelim-admin-overview-table"><div class="table-headline"><h2>整题概览</h2></div><table><thead><tr><th>题目</th><th>题型</th><th>知识点</th><th>小题数</th><th>正确率</th></tr></thead><tbody>${itemPage.items.map((item) => `<tr><td class="prelim-admin-title-cell">${routeAnchor(`/prelim/item/${item.id}`, prelimItemTitle(item))}</td><td class="nowrap">${esc(prelimSectionLabel(item.section))}</td><td>${prelimTags(item)}</td><td class="nowrap">${item.questionCount}</td><td class="nowrap">${prelimItemAccuracy(item)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">暂无题目</td></tr>'}</tbody></table>${renderPagination('/admin/prelim', params, itemPage, '道整题', { pageKey: 'itemPage', sizeKey: 'itemPageSize' })}</div>`;
 }
 
 async function renderPrelimImport() {
@@ -1979,9 +2143,9 @@ async function renderAnalytics() {
       <section class="card analytics-chart-card analytics-count-card"><div class="table-headline"><h2>考点出现次数</h2></div>${analyticsCountBarChart(stats.counts || [])}</section>
       <section class="card analytics-chart-card"><div class="table-headline"><h2>难度标签分布</h2></div>${analyticsDifficultyChart(stats.difficultyItems || [])}</section>
     </div>
-    <div class="analytics-grid-main equal">
-      <section class="card analytics-chart-card"><div class="table-headline"><h2>T1-T4 题位画像</h2></div>${analyticsFinalTaskCards(stats)}</section>
-      <section class="card analytics-chart-card"><div class="table-headline"><h2>题位/考点热力表</h2></div>${analyticsTaskHeatmap(stats)}</section>
+    <div class="analytics-stack">
+      <section class="card analytics-chart-card analytics-wide-card"><div class="table-headline"><h2>T1-T4 题位画像</h2></div>${analyticsFinalTaskCards(stats)}</section>
+      <section class="card analytics-chart-card analytics-wide-card"><div class="table-headline"><h2>题位/考点热力表</h2></div>${analyticsTaskHeatmap(stats)}</section>
     </div>
     <section class="card analytics-chart-card"><div class="table-headline"><h2>复赛题目明细</h2></div>${analyticsFinalProblemTable(stats)}</section>` : ''}
     ${selectedRound === '复赛' ? '' : `<div class="analytics-grid-main equal">
@@ -2045,6 +2209,7 @@ async function renderMockHome() {
   if (params.get('status') === 'done') papers = papers.filter((p) => p.latest);
   if (params.get('status') === 'todo') papers = papers.filter((p) => !p.latest);
   const years = [...new Set((data.papers || []).map((p) => p.year).filter(Boolean))].sort((a,b)=>b-a);
+  const pageData = paginateItems(papers, params);
   app.innerHTML = `<div class="mock-page mock-page-clean">
     <div class="card filter-panel-card mock-filter-card">
       <form id="mockFilter" class="mock-filter-form mock-filter-grid mock-filter-grid-clean">
@@ -2054,13 +2219,14 @@ async function renderMockHome() {
         <div class="filter-actions"><button class="primary">筛选</button><button type="button" class="reset-btn" onclick="nav('/prelim/mock')">重置</button></div>
       </form>
     </div>
-    <div class="mock-paper-list-wrap"><div class="mock-paper-list">${papers.length ? papers.map(mockCard).join('') : '<div class="card muted">暂无可用模考试卷</div>'}</div></div>
+    <div class="mock-paper-list-wrap"><div class="mock-paper-list">${pageData.items.length ? pageData.items.map(mockCard).join('') : '<div class="card muted">暂无可用真题卷</div>'}</div>${renderPagination('/prelim/mock', params, pageData, '套试卷')}</div>
   </div>`;
   qs('#mockFilter').onsubmit = (e) => {
     e.preventDefault();
     const f = formData(e.target);
     const q = new URLSearchParams();
     for (const k of ['keyword','status','year']) if (f[k]) q.set(k, f[k]);
+    setPreservedPageSize(q, params);
     nav('/prelim/mock' + (q.toString() ? `?${q}` : ''));
   };
 }
@@ -2445,7 +2611,6 @@ function collectProblemForm(form, existingId) {
     timeLimit: Number(f.timeLimit) || 1000,
     memoryLimit: Number(f.memoryLimit) || 128,
     checkerMode: form.querySelector('[name="specialJudge"]')?.checked ? 'special_judge' : 'standard',
-    checkerTolerance: 0.000001,
     isPublic: Boolean(form.querySelector('[name="isPublic"]')?.checked),
   };
 }
@@ -2475,7 +2640,7 @@ async function renderProblemEditor(id) {
   setImmersive(false);
   if (currentUser?.role !== 'admin') return renderLogin();
   const isNew = id === 'new';
-  let p = { id: '', title: '', description: '', tags: [], difficulty: 'beginner', timeLimit: 1000, memoryLimit: 128, checkerMode: 'standard', checkerTolerance: 0.000001, isPublic: false, hasChecker: false };
+  let p = { id: '', title: '', description: '', tags: [], difficulty: 'beginner', timeLimit: 1000, memoryLimit: 128, checkerMode: 'standard', isPublic: false, hasChecker: false };
   const tagDataPromise = api('/api/tags?scope=programming');
   if (!isNew) p = (await api(problemApi(id))).problem;
   if (isNew) {

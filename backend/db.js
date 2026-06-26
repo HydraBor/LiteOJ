@@ -29,7 +29,6 @@ function migrate() {
       difficulty TEXT NOT NULL DEFAULT 'unrated',
       time_limit INTEGER NOT NULL DEFAULT 1000,
       memory_limit INTEGER NOT NULL DEFAULT 128,
-      scoring_mode TEXT NOT NULL DEFAULT 'oi',
       checker_mode TEXT NOT NULL DEFAULT 'standard',
       checker_tolerance REAL NOT NULL DEFAULT 0.000001,
       is_public INTEGER NOT NULL DEFAULT 1,
@@ -230,7 +229,6 @@ function migrate() {
   ensureColumn('problems', 'difficulty', "TEXT NOT NULL DEFAULT 'unrated'");
   ensureColumn('problems', 'time_limit', 'INTEGER NOT NULL DEFAULT 1000');
   ensureColumn('problems', 'memory_limit', 'INTEGER NOT NULL DEFAULT 128');
-  ensureColumn('problems', 'scoring_mode', "TEXT NOT NULL DEFAULT 'oi'");
   ensureColumn('problems', 'checker_mode', "TEXT NOT NULL DEFAULT 'standard'");
   ensureColumn('problems', 'checker_tolerance', 'REAL NOT NULL DEFAULT 0.000001');
   ensureColumn('problems', 'is_public', 'INTEGER NOT NULL DEFAULT 1');

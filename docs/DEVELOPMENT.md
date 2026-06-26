@@ -1,6 +1,6 @@
 # LiteOJ 开发文档
 
-更新时间：2026-06-19
+更新时间：2026-06-27
 
 ## 本地环境
 
@@ -74,6 +74,10 @@ scripts/
   reset-admin.js       管理员恢复
   real-smoke-test.js   真实 API 测试
   smoke-test.js        静态烟测
+scripts/deploy/
+  data.sh              数据卷识别、备份和恢复
+  services.sh          app/go-judge/judge worker 生命周期
+  docker.sh            Docker 安装、镜像源和 go-judge 二进制准备
 ```
 
 ## 数据库迁移
@@ -104,6 +108,13 @@ scripts/
 2. 在 README 的 API 清单中补充；
 3. 在 `scripts/smoke-test.js` 添加关键路由断言；
 4. 如涉及真实链路，补 `scripts/real-smoke-test.js`。
+
+新增 `start.sh` 运维命令时需要：
+
+1. 在 `scripts/deploy/*.sh` 中保持模块化实现；
+2. 在 `start.sh` 用简短 action 暴露；
+3. 在部署手册和 README 同步用法；
+4. 在 `scripts/smoke-test.js` 增加命令存在性或关键字符串断言。
 
 ## 编程题开发约定
 
@@ -306,6 +317,8 @@ npm run real-smoke
 - 路由集中在 `render()`。
 - 页面渲染函数使用 `renderXxx` 命名。
 - 表单提交统一走 `api()` 或 `fetch + FormData`。
+- 列表页默认每页 20 条。新增列表优先复用 `DEFAULT_PAGE_SIZE`、`paginateItems()`、`renderPagination()` 和 `.pagination-bar`，筛选时保留当前 `pageSize` 并回到第一页。
+- 数据量会持续增长的列表优先做后端分页；提交记录 `/api/submissions` 已支持 `limit`、`page`、`total`。
 - 管理测试数据时不加载测试点正文，避免大数据卡顿。
 - SPJ、测试点、子任务管理都在测试数据管理页完成。
 

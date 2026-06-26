@@ -75,6 +75,29 @@ function contentDispositionAttachment(filename) {
   const encoded = encodeURIComponent(safe).replace(/['()*]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`);
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
+function parseCaseIds(value) {
+  if (Array.isArray(value)) return value.flatMap(parseCaseIds);
+  return String(value || '')
+    .split(',')
+    .map((item) => Number(item))
+    .filter((id) => Number.isInteger(id) && id > 0);
+}
+function selectProblemCases(problemId, ids = []) {
+  if (!ids.length) return db.prepare('SELECT * FROM problem_cases WHERE problem_id = ? ORDER BY sort, id').all(problemId);
+  const uniqueIds = [...new Set(ids)];
+  const placeholders = uniqueIds.map(() => '?').join(',');
+  return db.prepare(`SELECT * FROM problem_cases WHERE problem_id = ? AND id IN (${placeholders}) ORDER BY sort, id`).all(problemId, ...uniqueIds);
+}
+function addCaseFileToZip(zip, row, key) {
+  const relative = key === 'input' ? row.input_path : row.output_path;
+  const ext = key === 'input' ? '.in' : '.out';
+  const filePath = absoluteDataPath(relative);
+  const sort = Number(row.sort || row.id || 0);
+  const prefix = String(sort || row.id).padStart(3, '0');
+  const basename = path.basename(relative || `${prefix}${ext}`) || `${prefix}${ext}`;
+  const entryName = `testdata/${prefix}_${row.id}_${basename}`;
+  zip.addFile(entryName, fs.existsSync(filePath) ? fs.readFileSync(filePath) : Buffer.from(''));
+}
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: TESTDATA_ZIP_LIMIT_BYTES } });
 const attachmentUpload = multer({
   storage: multer.diskStorage({
@@ -444,8 +467,8 @@ router.put('/:id', requireAdmin, (req, res, next) => {
         return;
       }
       db.prepare(`INSERT INTO problems
-        (id, title, description, tags_json, difficulty, time_limit, memory_limit, scoring_mode, checker_mode, checker_tolerance, is_public, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(
+        (id, title, description, tags_json, difficulty, time_limit, memory_limit, checker_mode, checker_tolerance, is_public, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(
         requestedId,
         data.title,
         finalDescription,
@@ -453,7 +476,6 @@ router.put('/:id', requireAdmin, (req, res, next) => {
         data.difficulty,
         data.timeLimit,
         data.memoryLimit,
-        existing.scoring_mode || 'oi',
         data.checkerMode,
         data.checkerTolerance,
         boolToInt(data.isPublic),
@@ -654,6 +676,26 @@ router.get('/:id/cases', requireAdmin, (req, res, next) => {
   } catch (err) { return sendRouteError(res, err, next); }
 });
 
+router.get('/:id/cases/download', requireAdmin, (req, res, next) => {
+  try {
+    const problemId = getParamId(req);
+    const problem = db.prepare('SELECT id FROM problems WHERE id = ?').get(problemId);
+    if (!problem) return res.status(404).json({ error: '题目不存在' });
+    const ids = parseCaseIds(req.query.ids);
+    const rows = selectProblemCases(problemId, ids);
+    if (!rows.length) return res.status(404).json({ error: '没有可下载的测试点' });
+    const zip = new AdmZip();
+    for (const row of rows) {
+      addCaseFileToZip(zip, row, 'input');
+      addCaseFileToZip(zip, row, 'output');
+    }
+    const filename = `${problemId}-${ids.length ? 'selected-testdata' : 'testdata'}.zip`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', contentDispositionAttachment(filename));
+    return res.send(zip.toBuffer());
+  } catch (err) { return sendRouteError(res, err, next); }
+});
+
 router.get('/:id/cases/:caseId', requireAdmin, (req, res, next) => {
   try {
     const problemId = getParamId(req);
@@ -761,6 +803,32 @@ router.post('/:id/cases/zip', requireAdmin, upload.single('file'), (req, res, ne
     });
     tx();
     return res.json({ ok: true, imported: pairs.length, ignored, missing, replace, autoScore, subtaskMode, checkerImported: Boolean(checkerSource.trim()) });
+  } catch (err) { return sendRouteError(res, err, next); }
+});
+
+router.delete('/:id/cases', requireAdmin, (req, res, next) => {
+  try {
+    const problemId = getParamId(req);
+    const problem = db.prepare('SELECT id FROM problems WHERE id = ?').get(problemId);
+    if (!problem) return res.status(404).json({ error: '题目不存在' });
+    const ids = parseCaseIds(req.body?.ids);
+    if (!ids.length) return res.status(400).json({ error: '请选择要删除的测试点' });
+    const rows = selectProblemCases(problemId, ids);
+    if (!rows.length) return res.status(404).json({ error: '测试点不存在' });
+    const subtaskScores = new Map();
+    for (const row of rows) {
+      if (row.subtask && !subtaskScores.has(row.subtask)) subtaskScores.set(row.subtask, subtaskScore(problemId, row.subtask));
+    }
+    db.transaction(() => {
+      const del = db.prepare('DELETE FROM problem_cases WHERE id = ? AND problem_id = ?');
+      for (const row of rows) del.run(row.id, problemId);
+    })();
+    for (const row of rows) {
+      fs.rmSync(absoluteDataPath(row.input_path), { force: true });
+      fs.rmSync(absoluteDataPath(row.output_path), { force: true });
+    }
+    for (const [name, score] of subtaskScores.entries()) rebalanceSubtaskScores(problemId, name, null, score);
+    res.json({ ok: true, deleted: rows.length });
   } catch (err) { return sendRouteError(res, err, next); }
 });
 

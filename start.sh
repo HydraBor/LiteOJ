@@ -16,6 +16,8 @@ ACTION="${1:-start}"
 . "$ROOT_DIR/scripts/deploy/node.sh"
 # shellcheck disable=SC1091
 . "$ROOT_DIR/scripts/deploy/services.sh"
+# shellcheck disable=SC1091
+. "$ROOT_DIR/scripts/deploy/data.sh"
 
 case "$ACTION" in
   start) start_all ;;
@@ -24,10 +26,19 @@ case "$ACTION" in
   status) status_all ;;
   logs) logs_all ;;
   install) install_all ;;
+  backup) backup_all "${2:-}" ;;
+  restore) restore_all "${2:-}" ;;
+  data-volume) print_data_volume ;;
   stop-all) stop_all ;;
   *)
     cat <<'EOF'
-Usage: ./start.sh [start|stop|restart|status|logs|install|stop-all]
+Usage: ./start.sh [start|stop|restart|status|logs|install|backup|restore|data-volume|stop-all]
+
+Examples:
+  ./start.sh backup
+  ./start.sh backup /path/to/backups
+  ./start.sh restore backups/liteoj-data-YYYYMMDD-HHMMSS.tgz
+  ./start.sh data-volume
 EOF
     exit 1
     ;;

@@ -23,6 +23,7 @@ const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || '127.0.0.1';
 
 app.use(setSecurityHeaders);
 app.use(cookieParser());
@@ -53,6 +54,6 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: '服务器内部错误', detail: process.env.NODE_ENV === 'production' ? undefined : String(err.stack || err.message) });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`LiteOJ web server listening on http://0.0.0.0:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`LiteOJ web server listening on http://${HOST}:${PORT}`);
 });

@@ -14,7 +14,7 @@ JUDGE_TOKEN=$(random_secret)
 BACKEND_URL=http://127.0.0.1:${PORT:-3000}
 JUDGE_POLL_INTERVAL_MS=2000
 JUDGE_LOCK_TIMEOUT_SECONDS=600
-JUDGE_MAX_OUTPUT_BYTES=1048576
+JUDGE_MAX_OUTPUT_BYTES=16777216
 GO_JUDGE_URL=http://127.0.0.1:5050
 GO_JUDGE_PORT=5050
 GO_JUDGE_VERSION=1.12.0
@@ -61,7 +61,10 @@ EOF
   ensure_secret_key JUDGE_TOKEN
   ensure_plain_key JUDGE_POLL_INTERVAL_MS 2000
   ensure_plain_key JUDGE_LOCK_TIMEOUT_SECONDS 600
-  ensure_plain_key JUDGE_MAX_OUTPUT_BYTES 1048576
+  ensure_plain_key JUDGE_MAX_OUTPUT_BYTES 16777216
+  if [ "$(env_value JUDGE_MAX_OUTPUT_BYTES)" = "1048576" ]; then
+    set_env_key JUDGE_MAX_OUTPUT_BYTES 16777216
+  fi
   ensure_plain_key GO_JUDGE_PORT 5050
   ensure_plain_key GO_JUDGE_VERSION 1.12.0
   ensure_plain_key GO_JUDGE_RELEASE_BASE https://github.com/criyle/go-judge/releases/download

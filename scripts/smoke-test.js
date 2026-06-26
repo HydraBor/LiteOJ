@@ -14,7 +14,7 @@ const { applyScoring } = require('../judge/runner');
 function ids(list) { return list.map((x) => x.id); }
 
 const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-assert.strictEqual(packageJson.version, '1.3.0', 'package version should be 1.3.0 after judge system upgrade');
+assert.strictEqual(packageJson.version, '1.4.1', 'package version should be 1.4.1 after pagination and UI density polish');
 assert(!('sync-cutoffs' in packageJson.scripts), 'retired cutoff synchronization script should not remain in package scripts');
 assert.strictEqual(packageJson.scripts['reset-admin'], 'node scripts/reset-admin.js', 'package scripts should expose a safe admin reset utility');
 assert(!fs.existsSync(path.join(__dirname, '..', 'scripts', 'sync-cutoffs.js')), 'retired cutoff synchronization script should be removed');
@@ -28,9 +28,11 @@ assert(!readme.includes('作答方式') && !readme.includes('分数线种子'), 
 const deploymentDoc = fs.readFileSync(path.join(__dirname, '..', 'docs', 'DEPLOYMENT.md'), 'utf8');
 assert(!readme.includes('litoj.sh') && !deploymentDoc.includes('litoj.sh'), 'docs should not document misspelled startup scripts');
 assert(readme.includes('./start.sh') && deploymentDoc.includes('./start.sh'), 'docs should document start.sh as the primary deployment entrypoint');
+assert(readme.includes('./start.sh backup') && readme.includes('./start.sh restore') && deploymentDoc.includes('./start.sh data-volume'), 'docs should document script-based backup and restore commands');
 assert(deploymentDoc.includes('Docker Hub 超时处理') && deploymentDoc.includes('node:22-bookworm-slim'), 'deployment docs should include Docker Hub timeout recovery');
 const dbJsFinal = fs.readFileSync(path.join(__dirname, '..', 'backend', 'db.js'), 'utf8');
 assert(!dbJsFinal.includes('prelim_cutoffs'), 'final simplified analytics should not create or migrate cutoff tables');
+assert(!dbJsFinal.includes('scoring_mode'), 'retired scoring_mode column should not be created or migrated for new databases');
 const securityJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'security.js'), 'utf8');
 const profileRoutesJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'profile.js'), 'utf8');
 const passwordsJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'passwords.js'), 'utf8');
@@ -172,6 +174,7 @@ assert(!appJs.includes('<h1>后台管理</h1>') && !appJs.includes('<h1>个人�
 assert(appJs.includes('analyticsCountBarChart') && appJs.includes('analyticsDonutChart') && appJs.includes('analyticsYearCompare'), 'frontend analytics should render count bar chart, weighted donut chart, and year comparison table');
 assert(appJs.includes('analyticsFinalTaskCards') && appJs.includes('analyticsTaskHeatmap') && appJs.includes('analyticsDifficultyChart'), 'frontend analytics should render final-round T1-T4, heatmap, and difficulty charts');
 assert(appJs.includes('analyticsFinalYearCompare') && appJs.includes("selectedRound === '复赛' ? analyticsFinalYearCompare"), 'frontend final-round analytics should compare yearly tag counts');
+assert(appJs.includes('analytics-stack') && appJs.includes('analytics-wide-card'), 'final-round task cards and heatmap should render as separate full-width rows');
 assert(!appJs.includes("tag: '其他'") && !appJs.includes("tag: \"其他\""), 'analytics weighted donut should expand all exam points instead of merging them into 其他');
 assert(!appJs.includes('/api/analytics/prelim/cutoffs') && !appJs.includes('name="province"'), 'frontend analytics should not load cutoff lines or render province filters in the simplified version');
 assert(!outsideUiNamePattern.test(appJs) && !cssModuleNamePattern.test(appJs), 'frontend templates should use LiteOJ-owned semantic class names');
@@ -212,6 +215,10 @@ assert(appJs.includes("routeAnchor('/profile'"), 'logged-in user box should link
 assert(!appJs.includes('<h1>提交记录</h1>'), 'submissions page should not render a redundant page title');
 assert(appJs.includes('clearSubmissionPoll') && appJs.includes('location.pathname !== expectedPath'), 'submission polling should stop refreshing after the user leaves the submission page');
 assert(appJs.includes('function formatUtc8Time') && appJs.includes('UTC+8'), 'submission times should be formatted explicitly as UTC+8');
+assert(appJs.includes('DEFAULT_PAGE_SIZE = 20') && appJs.includes('PAGE_SIZE_OPTIONS = [10, 20, 50, 100]'), 'list pagination should default to 20 rows and expose stable page-size choices');
+assert(appJs.includes('renderPagination') && appJs.includes('page-size-select') && appJs.includes('paginateItems'), 'frontend lists should use the shared pagination component');
+assert(appJs.includes("renderPagination('/problems'") && appJs.includes("renderPagination('/prelim'") && appJs.includes("renderPagination('/prelim/mock'") && appJs.includes("renderPagination('/admin/problems'"), 'primary problem/prelim/mock/admin lists should render pagination controls');
+assert(appJs.includes("paperPageSize") && appJs.includes("itemPageSize") && !appJs.includes("prelim/questions?all=1"), 'prelim admin should paginate papers/items separately and avoid loading all subquestions');
 const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public', 'index.html'), 'utf8');
 assert(indexHtml.includes('/logo.svg'), 'index.html should apply the full logo');
 assert(indexHtml.includes('/logo-mark.svg'), 'index.html should apply the favicon mark');
@@ -231,6 +238,7 @@ assert(appJs.includes('activeCaseDragRows') && appJs.includes('case-subtask-scor
 assert(appJs.includes('name="specialJudge"') && appJs.includes('renderCheckerPanel') && appJs.includes("problemApi(problemId, '/checker')") && !appJs.includes('输出比较') && !appJs.includes('浮点误差'), 'problem editor and data manager should expose Special Judge without legacy compare/tolerance UI');
 
 const prelimRoutes = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'prelim.js'), 'utf8');
+assert(prelimRoutes.includes('truthPaperTitle') && prelimRoutes.includes('displayMockExamTitle') && prelimRoutes.includes('真题卷'), 'prelim true-paper flow should name papers as 真题卷 and normalize old mock titles');
 for (const route of ["router.get('/items'", "router.get('/items/:id'", "router.post('/questions/:id/check'", "router.post('/import-md'", "router.get('/facets'", "router.get('/mock/papers'", "router.post('/mock/start'", "router.post('/mock/exams/:id/submit'", 'scoreTotalForMock', 'clampScoreToTotal']) {
   assert(prelimRoutes.includes(route), `missing prelim backend route ${route}`);
 }
@@ -239,6 +247,7 @@ assert(!prelimRoutes.includes('req.query.questionType') && !prelimRoutes.include
 
 const serverJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'server.js'), 'utf8');
 assert(serverJs.includes("app.disable('x-powered-by')") && serverJs.includes('setSecurityHeaders') && serverJs.includes('staticOptions') && serverJs.includes("/api/profile"), 'server should install security headers, disable x-powered-by, and mount profile routes');
+assert(serverJs.includes("const HOST = process.env.HOST || '127.0.0.1'") && serverJs.includes('app.listen(PORT, HOST'), 'server should default to loopback binding unless HOST is explicitly provided');
 assert(serverJs.includes("res.setHeader('Cache-Control', 'no-cache')"), 'SPA fallback should set a Cache-Control header');
 const authJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'auth.js'), 'utf8');
 const authRoutesJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'auth.js'), 'utf8');
@@ -261,7 +270,10 @@ const composeYaml = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.y
 assert(composeYaml.includes('profiles:') && composeYaml.includes('container-judge'), 'container judge should be behind an explicit compose profile');
 assert(composeYaml.includes('JWT_SECRET:?') && composeYaml.includes('JUDGE_TOKEN:?') && composeYaml.includes('ADMIN_PASSWORD:?'), 'compose should require production secrets');
 assert(composeYaml.includes('network: ${DOCKER_BUILD_NETWORK:-host}'), 'docker build should use host network by default for domestic cloud/router environments');
+assert(composeYaml.includes('HOST: 0.0.0.0'), 'compose should make the app listen inside the container while publishing only loopback on the host');
+assert(composeYaml.includes('127.0.0.1:${PORT:-3000}:3000'), 'compose should bind the web port to loopback for reverse-proxy deployments');
 assert(composeYaml.includes('go-judge:') && composeYaml.includes('Dockerfile.go-judge') && composeYaml.includes('127.0.0.1:${GO_JUDGE_PORT:-5050}:5050'), 'compose should include a loopback-bound go-judge service');
+assert(composeYaml.includes('JUDGE_MAX_OUTPUT_BYTES: ${JUDGE_MAX_OUTPUT_BYTES:-16777216}'), 'compose should use the widened judge output limit by default');
 const dockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8');
 const dockerignore = fs.readFileSync(path.join(__dirname, '..', '.dockerignore'), 'utf8');
 assert(dockerfile.includes('fetch-retries 5') && dockerfile.includes('registry.npmjs.org') && dockerfile.includes('npm ci --omit=dev'), 'Dockerfile npm install should use retries and fallback registries');
@@ -276,12 +288,18 @@ const oneClickScript = fs.readFileSync(path.join(__dirname, '..', 'start.sh'), '
 const deployEnvScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy', 'env.sh'), 'utf8');
 const deployServiceScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy', 'services.sh'), 'utf8');
 const deployDockerScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy', 'docker.sh'), 'utf8');
+const deployDataScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy', 'data.sh'), 'utf8');
 assert(oneClickScript.includes('scripts/deploy/services.sh'), 'start.sh should source modular deployment scripts');
+assert(oneClickScript.includes('scripts/deploy/data.sh') && oneClickScript.includes('backup) backup_all') && oneClickScript.includes('restore) restore_all') && oneClickScript.includes('data-volume) print_data_volume'), 'start.sh should expose script-based backup, restore, and volume inspection actions');
 assert(!deployServiceScript.includes('JUDGE_EXECUTOR') && deployServiceScript.includes('GO_JUDGE_URL') && deployServiceScript.includes('GO_JUDGE_PROCESS_LIMIT') && deployServiceScript.includes('SPJ_TIMEOUT_MS') && deployServiceScript.includes('SPJ_MEMORY_LIMIT_MB') && deployServiceScript.includes('compose up -d --build app go-judge'), 'one-click script should start web plus go-judge and point the host judge worker at go-judge only');
+assert(deployDataScript.includes('resolve_data_volume') && deployDataScript.includes('liteoj-app') && deployDataScript.includes('/app/data') && deployDataScript.includes('compose config --format json'), 'data script should resolve the real Compose data volume instead of relying on a hard-coded volume name');
+assert(deployDataScript.includes('backup_all()') && deployDataScript.includes('restore_all()') && deployDataScript.includes('find /data -mindepth 1') && deployDataScript.includes('tar xzf'), 'data script should provide backup and destructive restore operations');
 assert(deployServiceScript.includes('ensure_web_port_available') && deployServiceScript.includes('LITEOJ_AUTO_PORT'), 'start script should auto-select a free web port when the default port is occupied');
 assert(deployServiceScript.includes('ensure_go_judge_port_available') && deployServiceScript.includes('LITEOJ_GO_JUDGE_PORT_SCAN_END'), 'start script should auto-select a free go-judge port when 5050 is occupied');
 assert(deployServiceScript.includes('/dev/tcp/127.0.0.1/$port'), 'port detection should also probe loopback so WSL/Docker Desktop notices Windows-side listeners');
 assert(deployEnvScript.includes('ADMIN_USERNAME=admin') && deployEnvScript.includes('ADMIN_PASSWORD=admin123'), 'one-click script should initialize the configured admin account');
+assert(deployEnvScript.includes('JUDGE_MAX_OUTPUT_BYTES=16777216') && deployEnvScript.includes('set_env_key JUDGE_MAX_OUTPUT_BYTES 16777216'), 'one-click script should initialize and upgrade the widened judge output limit');
+assert(deployServiceScript.includes('JUDGE_MAX_OUTPUT_BYTES=$(quote "${JUDGE_MAX_OUTPUT_BYTES:-16777216}")'), 'host judge worker should use the widened output limit by default');
 assert(deployEnvScript.includes('CHECKER_SOURCE_LIMIT=1') && deployEnvScript.includes('SPJ_TIMEOUT_MS=3000') && deployEnvScript.includes('SPJ_MEMORY_LIMIT_MB=256'), 'one-click script should initialize Special Judge limits');
 assert(deployEnvScript.includes('JUDGE_LOCK_TIMEOUT_SECONDS=600') && deployEnvScript.includes('MAX_CODE_SIZE_KB=128') && deployEnvScript.includes('MAX_JUDGE_QUEUE=500'), 'one-click script should initialize judge reliability and submission quota limits');
 assert(deployEnvScript.includes('ensure_plain_key ADMIN_USERNAME admin') && deployEnvScript.includes('is_placeholder "$(env_value ADMIN_PASSWORD)"'), 'one-click script should not reset existing admin credentials on every start');
@@ -304,6 +322,8 @@ assert(resetAdminJs.includes('existingTarget') && resetAdminJs.includes("UPDATE 
 
 const routes = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'problems.js'), 'utf8');
 const problemFilesJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'problem-files.js'), 'utf8');
+const goJudgeClientJs = fs.readFileSync(path.join(__dirname, '..', 'judge', 'go-judge-client.js'), 'utf8');
+assert(goJudgeClientJs.includes('16 * 1024 * 1024'), 'go-judge client should default to a 16 MiB output collection limit');
 assert(routes.includes('TESTDATA_UNZIPPED_LIMIT') && routes.includes('测试数据解压后总大小不能超过'), 'zip upload should limit total uncompressed testdata size');
 assert(routes.includes('ATTACHMENT_FILE_LIMIT') && routes.includes('multer.diskStorage') && routes.includes("'.zip'"), 'problem attachments should support bounded disk-backed download files');
 assert(routes.includes('MANUAL_CASE_LIMIT') && routes.includes('PROBLEM_STORAGE_LIMIT') && routes.includes('assertProblemStorage'), 'problem testdata and attachments should enforce per-problem storage quotas');
@@ -312,9 +332,10 @@ assert(routes.includes('tempAttachmentFileName') && routes.includes('contentDisp
 assert(problemFilesJs.includes('function sanitizeAttachmentFileName') && !problemFilesJs.includes('return `${Date.now()}_'), 'attachment final filenames should preserve the uploaded basename instead of adding random prefixes');
 assert(routes.includes("['publish', 'public', 'show']") && routes.includes("['hide', 'hidden']"), 'problem batch visibility actions should accept configured action aliases');
 assert(routes.includes('copyAttachmentsAndRewriteDescription'), 'clone should copy and rewrite attachment URLs');
-for (const route of ["router.patch('/:id/status'", "router.post('/:id/status'", "router.post('/:id/clone'", "router.post('/:id/attachments'", "router.get('/:id/attachments/:filename'", "router.get('/:id/checker'", "router.post('/:id/checker'", "router.delete('/:id/checker'", "router.delete('/:id'", "router.get('/:id/cases'", "router.get('/:id/cases/:caseId'", "router.post('/:id/cases'", "router.post('/:id/cases/zip'", "router.put('/:id/cases/bulk'", "router.delete('/:id/cases/:caseId'", "router.post('/:id/rejudge'", "router.post('/:id/submit'"]) {
+for (const route of ["router.patch('/:id/status'", "router.post('/:id/status'", "router.post('/:id/clone'", "router.post('/:id/attachments'", "router.get('/:id/attachments/:filename'", "router.get('/:id/checker'", "router.post('/:id/checker'", "router.delete('/:id/checker'", "router.delete('/:id'", "router.get('/:id/cases'", "router.get('/:id/cases/download'", "router.get('/:id/cases/:caseId'", "router.post('/:id/cases'", "router.post('/:id/cases/zip'", "router.put('/:id/cases/bulk'", "router.delete('/:id/cases'", "router.delete('/:id/cases/:caseId'", "router.post('/:id/rejudge'", "router.post('/:id/submit'"]) {
   assert(routes.includes(route), `missing backend route ${route}`);
 }
+assert(routes.includes('addCaseFileToZip') && routes.includes('selectProblemCases') && routes.includes('selected-testdata'), 'problem routes should support all/selected testdata zip downloads');
 assert(appJs.includes('raw.replace(/\\\\\\\((.+?)\\\\\\\)/g') || appJs.includes('raw.replace(/\\\\\((.+?)\\\\\)/g'), 'inline markdown should support \\(...\\) KaTeX math');
 assert(appJs.includes('text.replace(/\\\\\\\[([\\s\\S]*?)\\\\\\\]/g') || appJs.includes('text.replace(/\\\\\[([\\s\\S]*?)\\\\\]/g'), 'markdown should support \\[...\\] display math');
 assert(!appJs.includes('readAsDataURL'), 'Markdown image upload must not inline base64 data URLs');
@@ -328,6 +349,8 @@ assert(!appJs.includes(' · ${esc(meta)}'), 'problem tag selector should not sho
 const styleCss = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public', 'style.css'), 'utf8');
 assert(styleCss.includes('.table-action-row'), 'management table buttons should use an inner flex row so td borders stay aligned');
 assert(styleCss.includes('td.actions.table-actions'), 'compatibility table action td should remain a table-cell, not a flex row');
+assert(styleCss.includes('.pagination-bar') && styleCss.includes('.page-size-control'), 'stylesheet should define the shared pagination bar and page-size selector');
+assert(styleCss.includes('.manage-problem-table .table-action-row { flex-wrap: nowrap') && styleCss.includes('.prelim-admin-overview-table'), 'admin tables should keep dense non-wrapping action layouts on desktop');
 assert(styleCss.includes('.filter-panel-card') && styleCss.includes('.filter-panel-grid'), 'shared filter panel classes should be project-owned semantic names');
 assert(!outsideUiNamePattern.test(styleCss) && !cssModuleNamePattern.test(styleCss), 'stylesheet should not keep external-looking class names or comments');
 assert(styleCss.includes('.button-row'), 'button rows should use shared spacing class');
@@ -343,7 +366,11 @@ assert(appJs.includes("routeLink(`/admin/problem/${problemUrl(p.id)}/edit`, '编
 assert(appJs.includes("routeLink(`/admin/problem/${problemUrl(p.id)}/data`, '数据'"), 'problem manage data action should be a real link');
 assert(appJs.includes('case-delete-btn') && appJs.includes('data-problem-id=') && appJs.includes("btn.addEventListener('click', () => deleteCase"), 'case delete buttons should use stable data attributes and explicit event binding');
 assert(appJs.includes('async function deleteCase') && appJs.includes('window.deleteCase = deleteCase'), 'deleteCase should be both locally callable and globally exported');
+assert(appJs.includes('downloadAllCasesBtn') && appJs.includes('downloadSelectedCasesBtn') && appJs.includes('deleteSelectedCasesBtn') && appJs.includes("problemApi(problemId, `/cases/download${query}`)"), 'case manager should expose all/selected testdata download and selected delete actions');
+assert(appJs.includes('formatMemoryKb') && appJs.includes('<th>内存</th>') && appJs.includes('routeAnchor(`/problem/${problemUrl(s.problemId)}`'), 'submission pages should show memory and link back to the problem');
 assert(styleCss.includes('a.btn') && styleCss.includes('.table-action-row .btn'), 'link-style action buttons should share the same UI as normal buttons');
+const submissionsRoutes = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'submissions.js'), 'utf8');
+assert(submissionsRoutes.includes('const requestedLimit') && submissionsRoutes.includes('COUNT(*) AS count') && submissionsRoutes.includes('LIMIT ? OFFSET ?'), 'submission list API should support server-side pagination');
 
 assert(!/td\s*\{[^}]*display\s*:\s*flex/i.test(styleCss), 'plain td must not be flex because it breaks table borders');
 assert(!/td\.[^{]+\{[^}]*display\s*:\s*flex/i.test(styleCss), 'table action td must not be flex because it breaks row borders');

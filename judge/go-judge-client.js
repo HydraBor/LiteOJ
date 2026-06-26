@@ -1,4 +1,4 @@
-const MAX_OUTPUT_BYTES = Number(process.env.JUDGE_MAX_OUTPUT_BYTES || 1024 * 1024);
+const MAX_OUTPUT_BYTES = Number(process.env.JUDGE_MAX_OUTPUT_BYTES || 16 * 1024 * 1024);
 
 const NS_PER_MS = 1000000;
 const BYTES_PER_MB = 1024 * 1024;

@@ -1,6 +1,6 @@
 # LiteOJ 部署手册
 
-更新时间：2026-06-19
+更新时间：2026-06-27
 
 ## 推荐环境
 
@@ -51,6 +51,9 @@ chmod +x ./start.sh
 ./start.sh status       # 状态
 ./start.sh logs         # app 容器日志 + judge 日志
 ./start.sh install      # 只准备依赖
+./start.sh backup       # 备份数据卷和 .env 到 backups/
+./start.sh restore backups/liteoj-data-YYYYMMDD-HHMMSS.tgz
+./start.sh data-volume  # 查看当前项目真实使用的数据卷
 ```
 
 ## 端口
@@ -124,7 +127,7 @@ COOKIE_SECURE=auto
 ```dotenv
 JUDGE_POLL_INTERVAL_MS=2000
 JUDGE_LOCK_TIMEOUT_SECONDS=600
-JUDGE_MAX_OUTPUT_BYTES=1048576
+JUDGE_MAX_OUTPUT_BYTES=16777216
 GO_JUDGE_URL=http://127.0.0.1:5050
 GO_JUDGE_PROCESS_LIMIT=64
 SPJ_TIMEOUT_MS=3000
@@ -161,6 +164,7 @@ MAX_JUDGE_QUEUE=500
 - `MAX_JUDGE_QUEUE`：全站最多同时处于 Waiting/Judging 的提交数。
 - `JUDGE_LOCK_TIMEOUT_SECONDS`：`Judging` 任务超时未回写后自动回收为 `Waiting` 的时间。
 - `SPJ_TIMEOUT_MS`：毫秒，checker 单次运行时间。
+- `JUDGE_MAX_OUTPUT_BYTES`：字节，用户程序单个测试点标准输出采集上限，默认 16 MiB。
 - `SPJ_MEMORY_LIMIT_MB`：MB，checker 单次运行内存。
 
 ## 管理员账号
@@ -204,6 +208,14 @@ npm run judge
 docker compose --profile container-judge up -d --build
 ```
 
+`docker-compose.yml` 默认把 Web 端口发布到 `127.0.0.1:${PORT:-3000}`。公网部署时推荐只让 Caddy / Nginx / Traefik 访问该本机端口，不要把 `3000` 直接暴露到外网。
+
+容器内的 Node 进程会监听 `HOST=0.0.0.0`，这是为了让 Docker 端口转发能访问容器；安全边界在宿主机端口发布规则。若不使用 Docker、直接在宿主机运行 `npm start`，LiteOJ 默认监听 `127.0.0.1:${PORT:-3000}`，也可以显式设置：
+
+```bash
+HOST=127.0.0.1 PORT=3000 npm start
+```
+
 ## 反向代理
 
 推荐使用 Nginx/Caddy/Traefik 提供 HTTPS，并反代到 LiteOJ Web 端口。HTTPS 下 `COOKIE_SECURE=auto` 会自动给 Cookie 加 `Secure`。
@@ -234,14 +246,24 @@ server {
 }
 ```
 
+Caddy 示例：
+
+```caddyfile
+oj.example.com {
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
 不要反代或暴露 `GO_JUDGE_PORT`。
 
 ## 备份、恢复与清空 Docker 数据
 
-LiteOJ 的持久数据默认位于 Docker volume `liteoj_liteoj-data`。如果你修改了 Compose project name，先确认实际 volume 名：
+LiteOJ 的持久数据位于 Docker volume。不要手写某个看起来像项目数据卷的名字：Compose project name 不同时，真实 volume 名也会不同；如果写错，Docker 会自动创建一个空的新 volume，恢复命令看起来成功但网站数据不会变化。
+
+先用脚本确认当前项目实际使用的数据卷：
 
 ```bash
-docker volume ls | grep liteoj-data
+./start.sh data-volume
 ```
 
 数据内容包括：
@@ -256,32 +278,43 @@ docker volume ls | grep liteoj-data
 建议停机备份，避免 SQLite 正在写入时生成不一致快照：
 
 ```bash
-mkdir -p backups
-./start.sh stop
-docker run --rm \
-  -v liteoj_liteoj-data:/data:ro \
-  -v "$PWD/backups":/backup \
-  busybox sh -c 'tar czf /backup/liteoj-data-$(date +%Y%m%d-%H%M%S).tgz -C /data .'
-cp .env "backups/liteoj-env-$(date +%Y%m%d-%H%M%S).bak"
-./start.sh
+./start.sh backup
+```
+
+备份会写入 `backups/liteoj-data-YYYYMMDD-HHMMSS.tgz`，并同时复制一份 `.env` 到 `backups/liteoj-env-YYYYMMDD-HHMMSS.bak`。如需指定备份目录：
+
+```bash
+./start.sh backup /path/to/backups
 ```
 
 这份备份同时包含编程题库、初赛题库、用户数据、提交记录、题面附件和测试数据。
 
 ### 全量恢复
 
-恢复会覆盖当前 volume，请先确认备份文件名：
+恢复会覆盖当前 volume，请先确认备份文件名。脚本会自动停止服务、清空真实数据卷、解压备份并重新启动：
 
 ```bash
-./start.sh stop
-docker run --rm \
-  -v liteoj_liteoj-data:/data \
-  -v "$PWD/backups":/backup \
-  busybox sh -c 'rm -rf /data/* /data/.[!.]* /data/..?*; tar xzf /backup/liteoj-data-YYYYMMDD-HHMMSS.tgz -C /data'
-./start.sh
+ls backups
+./start.sh restore backups/liteoj-data-YYYYMMDD-HHMMSS.tgz
 ```
 
-如果同时恢复 `.env`，请先检查 `JWT_SECRET`、`JUDGE_TOKEN` 和管理员密码是否符合当前服务器配置。
+如果同时恢复 `.env`，请先检查 `JWT_SECRET`、`JUDGE_TOKEN`、端口和管理员密码是否符合当前服务器配置，再执行：
+
+```bash
+cp .env ".env.before-restore-$(date +%Y%m%d-%H%M%S)"
+cp backups/liteoj-env-YYYYMMDD-HHMMSS.bak .env
+chmod 600 .env
+./start.sh restart
+```
+
+如果你曾经执行过手动恢复命令但“没有作用”，通常是恢复到了错误 volume。可以这样排查：
+
+```bash
+./start.sh data-volume
+docker volume ls | grep liteoj-data
+```
+
+删除误创建的空 volume 前先确认它不是 `./start.sh data-volume` 输出的那个。
 
 ### 清空 Docker 数据
 

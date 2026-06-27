@@ -33,6 +33,7 @@ assert(deploymentDoc.includes('Docker Hub 超时处理') && deploymentDoc.includ
 const dbJsFinal = fs.readFileSync(path.join(__dirname, '..', 'backend', 'db.js'), 'utf8');
 assert(!dbJsFinal.includes('prelim_cutoffs'), 'final simplified analytics should not create or migrate cutoff tables');
 assert(!dbJsFinal.includes('scoring_mode'), 'retired scoring_mode column should not be created or migrated for new databases');
+assert(dbJsFinal.includes('CREATE TABLE IF NOT EXISTS app_settings') && dbJsFinal.includes('CREATE TABLE IF NOT EXISTS ai_sessions') && dbJsFinal.includes('CREATE TABLE IF NOT EXISTS ai_messages'), 'database migration should create AI settings, sessions, and message history tables');
 const securityJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'security.js'), 'utf8');
 const profileRoutesJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'profile.js'), 'utf8');
 const passwordsJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'passwords.js'), 'utf8');
@@ -209,6 +210,14 @@ assert(appJs.includes('window.startMockExam = async'), 'mock start handler shoul
 
 assert(appJs.includes('/logo-mark.svg'), 'auth page should use the SVG LiteOJ mark');
 assert(appJs.includes('async function renderProfile') && appJs.includes('/api/profile/password') && appJs.includes("path === '/profile'"), 'frontend should provide a profile page for password changes');
+assert(appJs.includes('async function renderAiPage') && appJs.includes('/api/ai/sessions') && appJs.includes('readAiEventStream') && appJs.includes("path === '/ai'"), 'frontend should provide an authenticated AI chat page with streaming reads');
+assert(appJs.includes('createAiSessionAction') && appJs.includes('renameAiSessionAction') && appJs.includes('deleteAiSessionAction') && appJs.includes('sendAiMessageAction'), 'AI frontend global handlers should call private action functions instead of recursively calling themselves');
+assert(!appJs.includes('window.createAiSession = () => runUiAction(createAiSession)') && !appJs.includes('window.sendAiMessage = (sessionId) => runUiAction(() => sendAiMessage(sessionId))'), 'AI frontend should avoid recursive global handler wrappers');
+assert(appJs.includes('你好小轻') && appJs.includes('会话记录') && appJs.includes('你好，我是小轻👋'), 'AI frontend should present 小轻 branding, history wording, and welcome state');
+assert(appJs.includes('aiComposerHtml(config, disabledReason)') && appJs.includes('messages.map((msg) => aiMessageHtml(msg)).join'), 'AI frontend should render the message area and reusable bottom composer');
+assert(appJs.includes("if (!activeSessionId)") && appJs.includes("POST', body: { title: '新会话' }") && appJs.includes("history.replaceState(null, '', `/ai?session=${activeSessionId}`)"), 'AI frontend should auto-create a session when sending from the welcome page');
+assert(appJs.includes('async function renderAdminAiSettings') && appJs.includes('/api/admin/ai-settings') && appJs.includes("path === '/admin/ai'"), 'frontend should provide an admin AI settings page');
+assert(appJs.includes('renderMarkdown(assistantContent)') && appJs.includes('ai-message-content'), 'AI frontend should render streamed Markdown content with the shared renderer');
 assert(appJs.includes('resetUserPassword') && appJs.includes('/reset-password') && appJs.includes('123456'), 'user admin page should expose password reset to 123456');
 assert(appJs.includes('handleUserAdminAction') && appJs.includes("app.addEventListener('click', handleUserAdminAction)") && appJs.includes("decodeAttrValue(btn.dataset.username"), 'user admin actions should use stable delegated click handling');
 assert(appJs.includes("routeAnchor('/profile'"), 'logged-in user box should link to the profile page');
@@ -222,6 +231,7 @@ assert(appJs.includes("paperPageSize") && appJs.includes("itemPageSize") && !app
 const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public', 'index.html'), 'utf8');
 assert(indexHtml.includes('/logo.svg'), 'index.html should apply the full logo');
 assert(indexHtml.includes('/logo-mark.svg'), 'index.html should apply the favicon mark');
+assert(indexHtml.includes('id="aiNav"') && indexHtml.includes('data-route="/ai"') && indexHtml.includes('你好小轻'), 'main navigation should expose the 小轻 page to logged-in users');
 assert(fs.existsSync(path.join(__dirname, '..', 'frontend', 'public', 'logo.svg')), 'full logo SVG should exist');
 assert(fs.existsSync(path.join(__dirname, '..', 'frontend', 'public', 'logo-mark.svg')), 'logo mark SVG should exist');
 const logoMark = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public', 'logo-mark.svg'), 'utf8');
@@ -247,16 +257,33 @@ assert(!prelimRoutes.includes('req.query.questionType') && !prelimRoutes.include
 
 const serverJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'server.js'), 'utf8');
 assert(serverJs.includes("app.disable('x-powered-by')") && serverJs.includes('setSecurityHeaders') && serverJs.includes('staticOptions') && serverJs.includes("/api/profile"), 'server should install security headers, disable x-powered-by, and mount profile routes');
+assert(serverJs.includes("const aiRoutes = require('./routes/ai')") && serverJs.includes("app.use('/api/ai', aiRoutes)"), 'server should mount authenticated AI chat routes');
 assert(serverJs.includes("const HOST = process.env.HOST || '127.0.0.1'") && serverJs.includes('app.listen(PORT, HOST'), 'server should default to loopback binding unless HOST is explicitly provided');
 assert(serverJs.includes("res.setHeader('Cache-Control', 'no-cache')"), 'SPA fallback should set a Cache-Control header');
 const authJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'auth.js'), 'utf8');
 const authRoutesJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'auth.js'), 'utf8');
 const adminRoutesJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'admin.js'), 'utf8');
+const aiRoutesJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'ai.js'), 'utf8');
+const settingsJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'settings.js'), 'utf8');
 assert(securityJs.includes('function createRateLimit') && securityJs.includes('Retry-After'), 'security helper should expose lightweight API rate limiting');
 assert(authRoutesJs.includes('hashPassword(password)') && authRoutesJs.includes('verifyPassword(password, row.password_hash)') && !authRoutesJs.includes('bcrypt.compareSync'), 'auth routes should use centralized bcrypt password helpers');
 assert(authRoutesJs.includes('LOGIN_RATE_LIMIT') && authRoutesJs.includes('REGISTER_RATE_LIMIT'), 'auth routes should rate-limit login and registration');
 assert(authRoutesJs.includes("process.env.NODE_ENV !== 'production'"), 'production registration should not let the first public registrant become admin');
 assert(adminRoutesJs.includes("router.post('/users/:id/reset-password'") && adminRoutesJs.includes("DEFAULT_RESET_PASSWORD = '123456'") && adminRoutesJs.includes('hashPassword(DEFAULT_RESET_PASSWORD)'), 'admin routes should reset user passwords to 123456 using bcrypt');
+assert(adminRoutesJs.includes("router.get('/ai-settings'") && adminRoutesJs.includes("router.put('/ai-settings'") && adminRoutesJs.includes('saveAiSettings'), 'admin routes should expose AI configuration without exposing API keys');
+const aiPromptsJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'ai-prompts.js'), 'utf8');
+assert(settingsJs.includes("'ai.provider': 'xfyun'") && settingsJs.includes("'ai.default_model': 'xopqwen36v35b'") && settingsJs.includes("'ai.context_mode': 'recent'") && settingsJs.includes("'ai.context_recent_messages': '6'"), 'AI settings should default to Xunfei Xingchen Qwen3.6 with recent context');
+assert(dbJsFinal.includes("key = 'ai.default_model'") && dbJsFinal.includes("value = 'xsparkx2flash'") && dbJsFinal.includes("xopqwen36v35b"), 'database migration should upgrade the old Xunfei default model to Qwen3.6');
+assert(settingsJs.includes('AI_PROVIDER_DEFAULTS') && settingsJs.includes('XFYUN_API_KEY') && settingsJs.includes('DEEPSEEK_API_KEY'), 'AI settings should support Xunfei first and keep DeepSeek switchback');
+assert(aiRoutesJs.includes('streamOpenAiCompatible') && aiRoutesJs.includes('/chat/completions') && aiRoutesJs.includes('stream: true'), 'AI route should call OpenAI-compatible chat completions with streaming enabled');
+assert(aiRoutesJs.includes("settings.provider === 'xfyun'") && aiRoutesJs.includes('enable_thinking = false'), 'Xunfei streaming should disable reasoning output so the UI receives assistant content directly');
+assert(aiRoutesJs.includes("router.get('/sessions'") && aiRoutesJs.includes("router.post('/sessions'") && aiRoutesJs.includes("router.patch('/sessions/:id'") && aiRoutesJs.includes("router.delete('/sessions/:id'"), 'AI route should support session CRUD');
+assert(aiRoutesJs.includes('ownedSession(id, req.user.id)') && aiRoutesJs.includes("WHERE session_id = ? AND user_id = ?"), 'AI route should scope sessions and messages to the current user');
+assert(aiRoutesJs.includes("settings.contextMode === 'recent'") && aiRoutesJs.includes("messages.push({ role: 'user', content })"), 'AI route should support none/recent context and always append the current user message');
+assert(aiRoutesJs.includes("'text/event-stream; charset=utf-8'") && aiRoutesJs.includes("sse(res, 'delta'") && aiRoutesJs.includes("sse(res, 'done'"), 'AI route should stream delta and done events to the frontend');
+assert(aiRoutesJs.includes('looksLikeFullCodeRequest') && aiRoutesJs.includes('DIRECT_REFUSAL_TEMPLATE') && aiRoutesJs.includes('liteoj-direct-refusal'), 'AI route should intercept direct full-code requests without calling upstream models');
+assert(aiRoutesJs.includes('AI_IDENTITY_PROMPT') && aiRoutesJs.includes("settings.systemPrompt.includes('小轻')"), 'AI route should append 小轻 identity guidance for existing saved prompts');
+assert(aiPromptsJs.includes('AI_IDENTITY_PROMPT') && aiPromptsJs.includes('你的名字叫小轻') && aiPromptsJs.includes('我不能直接替你写完整可提交代码') && aiPromptsJs.includes('直接给我代码') && aiPromptsJs.includes('FULL_CODE_PATTERNS'), 'AI prompt policy should include 小轻 identity and direct-code refusal patterns');
 assert(authJs.includes('SELECT id, username, role FROM users WHERE id = ?'), 'auth should validate token user still exists before using foreign-keyed user_id');
 assert(authJs.includes('JWT_SECRET must be set to a strong random value in production'), 'production should reject missing or weak JWT_SECRET');
 assert(authJs.includes('clearAuthCookie(req, res)'), 'stale login cookie should be cleared with request-aware cookie attributes');
@@ -272,6 +299,7 @@ assert(composeYaml.includes('JWT_SECRET:?') && composeYaml.includes('JUDGE_TOKEN
 assert(composeYaml.includes('network: ${DOCKER_BUILD_NETWORK:-host}'), 'docker build should use host network by default for domestic cloud/router environments');
 assert(composeYaml.includes('HOST: 0.0.0.0'), 'compose should make the app listen inside the container while publishing only loopback on the host');
 assert(composeYaml.includes('127.0.0.1:${PORT:-3000}:3000'), 'compose should bind the web port to loopback for reverse-proxy deployments');
+assert(composeYaml.includes('XFYUN_API_KEY: ${XFYUN_API_KEY:-}') && composeYaml.includes('DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}'), 'compose should pass AI provider API keys only to the backend container');
 assert(composeYaml.includes('go-judge:') && composeYaml.includes('Dockerfile.go-judge') && composeYaml.includes('127.0.0.1:${GO_JUDGE_PORT:-5050}:5050'), 'compose should include a loopback-bound go-judge service');
 assert(composeYaml.includes('JUDGE_MAX_OUTPUT_BYTES: ${JUDGE_MAX_OUTPUT_BYTES:-16777216}'), 'compose should use the widened judge output limit by default');
 const dockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8');
@@ -286,6 +314,7 @@ assert(goJudgeMount.includes('workDir: /w') && goJudgeMount.includes('source: /u
 assert(dockerignore.includes('!.runtime/go-judge/go-judge'), 'dockerignore should allow the prepared go-judge binary into the build context');
 const oneClickScript = fs.readFileSync(path.join(__dirname, '..', 'start.sh'), 'utf8');
 const deployEnvScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy', 'env.sh'), 'utf8');
+const envExample = fs.readFileSync(path.join(__dirname, '..', '.env.example'), 'utf8');
 const deployServiceScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy', 'services.sh'), 'utf8');
 const deployDockerScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy', 'docker.sh'), 'utf8');
 const deployDataScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy', 'data.sh'), 'utf8');
@@ -302,6 +331,8 @@ assert(deployEnvScript.includes('JUDGE_MAX_OUTPUT_BYTES=16777216') && deployEnvS
 assert(deployServiceScript.includes('JUDGE_MAX_OUTPUT_BYTES=$(quote "${JUDGE_MAX_OUTPUT_BYTES:-16777216}")'), 'host judge worker should use the widened output limit by default');
 assert(deployEnvScript.includes('CHECKER_SOURCE_LIMIT=1') && deployEnvScript.includes('SPJ_TIMEOUT_MS=3000') && deployEnvScript.includes('SPJ_MEMORY_LIMIT_MB=256'), 'one-click script should initialize Special Judge limits');
 assert(deployEnvScript.includes('JUDGE_LOCK_TIMEOUT_SECONDS=600') && deployEnvScript.includes('MAX_CODE_SIZE_KB=128') && deployEnvScript.includes('MAX_JUDGE_QUEUE=500'), 'one-click script should initialize judge reliability and submission quota limits');
+assert(deployEnvScript.includes('XFYUN_API_KEY=') && deployEnvScript.includes('ensure_plain_key XFYUN_API_KEY') && deployEnvScript.includes('DEEPSEEK_API_KEY=') && deployEnvScript.includes('ensure_plain_key DEEPSEEK_API_KEY'), 'one-click script should create empty AI API key placeholders for server-side calls');
+assert(envExample.includes('XFYUN_API_KEY=') && envExample.includes('DEEPSEEK_API_KEY='), '.env.example should document server-side AI API key placeholders');
 assert(deployEnvScript.includes('ensure_plain_key ADMIN_USERNAME admin') && deployEnvScript.includes('is_placeholder "$(env_value ADMIN_PASSWORD)"'), 'one-click script should not reset existing admin credentials on every start');
 assert(deployServiceScript.includes('start_judge()') && deployServiceScript.includes('judge/worker.js'), 'one-click script should start a host judge worker');
 assert(deployDockerScript.includes('mirrors.tuna.tsinghua.edu.cn/docker-ce') && deployDockerScript.includes('docker.1ms.run') && deployDockerScript.includes('Preparing base image debian:bookworm-slim') && deployDockerScript.includes('prepare_go_judge_binary'), 'deployment should prefer domestic Docker apt/registry mirrors and prepare go-judge outside Docker Hub mirrors');
@@ -342,11 +373,14 @@ assert(!appJs.includes('readAsDataURL'), 'Markdown image upload must not inline 
 assert(appJs.includes('isMarkdownTableAlignRow') && appJs.includes('rowspan=') && appJs.includes("String(text).trim() === '^'"), 'Markdown table renderer should support alignment rows and ^ vertical merges');
 assert(appJs.includes('colLast: index === colCount - 1') && appJs.includes("classes.push('col-last')"), 'Markdown table renderer should mark the logical last column so rowspans do not break borders');
 assert(appJs.includes('normalizeBrokenMarkdownLinks') && appJs.includes('cuteTableWrapperClass') && appJs.includes('md-align'), 'Markdown renderer should support split image links plus :::align and ::cute-table directives');
+assert(appJs.includes('function isMarkdownHorizontalRule') && appJs.includes('<hr class="md-hr" />'), 'Markdown renderer should display --- separators as horizontal rules');
 assert(appJs.includes('data-md-attachment') && appJs.includes('insertAttachmentIntoEditor'), 'Markdown toolbar should upload non-image attachments and insert links');
 assert(appJs.includes('tag-search-input') && appJs.includes('tag-check-option') && appJs.includes('data-tag-search') && appJs.includes('type="checkbox" name="tags"'), 'problem editor should use searchable checkbox tag selection');
 assert(appJs.includes('tag-selected-box') && appJs.includes('updateSelectedTagBox') && appJs.includes('data-remove-tag'), 'problem editor should show and maintain selected tag chips');
 assert(!appJs.includes(' · ${esc(meta)}'), 'problem tag selector should not show level suffixes such as · topic');
 const styleCss = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public', 'style.css'), 'utf8');
+assert(styleCss.includes('.container.ai-container') && styleCss.includes('position: sticky') && styleCss.includes('height: calc(100vh - 108px)') && styleCss.includes('.ai-welcome-card'), 'AI page CSS should widen 小轻 and keep history/composer independent from message scrolling');
+assert(styleCss.includes('border-radius: 28px') && styleCss.includes('box-shadow: 0 18px 42px') && styleCss.includes('backdrop-filter: blur(12px)'), 'AI composer should render as a rounded floating bottom bar');
 assert(styleCss.includes('.table-action-row'), 'management table buttons should use an inner flex row so td borders stay aligned');
 assert(styleCss.includes('td.actions.table-actions'), 'compatibility table action td should remain a table-cell, not a flex row');
 assert(styleCss.includes('.pagination-bar') && styleCss.includes('.page-size-control'), 'stylesheet should define the shared pagination bar and page-size selector');
@@ -358,6 +392,7 @@ assert(styleCss.includes('-webkit-backdrop-filter: blur(16px); backdrop-filter: 
 assert(styleCss.includes('-webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);'), 'editor footer should include Safari backdrop-filter prefix');
 assert(styleCss.includes('.tag-check-list') && styleCss.includes('.tag-search-input') && styleCss.includes('.align-center'), 'stylesheet should support tag checkbox search and Markdown table alignment');
 assert(styleCss.includes('.md-align-center') && styleCss.includes('.md-cute-table'), 'stylesheet should support custom Markdown alignment and cute table rendering');
+assert(styleCss.includes('.markdown .md-hr') && styleCss.includes('linear-gradient(90deg'), 'stylesheet should render Markdown horizontal rules softly');
 assert(styleCss.includes('.md-table .col-last') && !styleCss.includes('.md-table th:last-child') && !styleCss.includes('.md-table tr:last-child td'), 'Markdown table borders should be based on logical columns and keep the closing bottom line');
 assert(appJs.includes('function enhanceFormAccessibility') && appJs.includes('ensureControlId') && appJs.includes('aria-label'), 'dynamic forms should be normalized with id/name/label accessibility helpers');
 
@@ -390,6 +425,9 @@ assert(!appJs.includes('onclick="deleteCase('), 'case delete must not use duplic
 assert(appJs.includes('PROBLEM_ROUTE_PATTERN') && appJs.includes('(?:T\\\\d+)?'), 'frontend problem routes should accept CSPJ25T1-style ids');
 assert(appJs.includes('return await renderProblemEditor(m[1]);') || appJs.includes('return renderProblemEditor(m[1]);'), 'new-problem route should dispatch to renderProblemEditor');
 assert(appJs.includes('return await renderCaseManager(m[1]);') || appJs.includes('return renderCaseManager(m[1]);'), 'testdata route should dispatch to renderCaseManager');
+assert(appJs.includes("function jsArg(value)") && appJs.includes("replace(/'/g,"), 'frontend should keep a dedicated string escaper for inline JS arguments');
+assert(!appJs.includes("return JSON.stringify(String(value ??"), 'inline JS string arguments should not break double-quoted onclick attributes');
+assert(appJs.includes("onclick=\"rejudgeProblem(${jsArg(p.id)})\""), 'problem page should render the rejudge button with a safely quoted problem id');
 assert(appJs.includes("const url = isNew ? '/api/problems' : problemApi(existingProblem.id)"), 'problem editor should PUT updates to the original id so the id itself can change');
 assert(appJs.includes('async function saveProblemEditor') && appJs.includes("const method = isNew ? 'POST' : 'PUT'") && appJs.includes("const url = isNew ? '/api/problems' : problemApi(existingProblem.id)"), 'problem editor save should distinguish create/update and allow id changes');
 

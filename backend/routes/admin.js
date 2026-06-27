@@ -2,6 +2,7 @@ const express = require('express');
 const { db } = require('../db');
 const { requireAdmin } = require('../auth');
 const { hashPassword } = require('../passwords');
+const { getAiSettings, saveAiSettings } = require('../settings');
 
 const router = express.Router();
 const DEFAULT_RESET_PASSWORD = '123456';
@@ -40,6 +41,16 @@ router.post('/users/:id/reset-password', requireAdmin, (req, res) => {
   if (!user) return res.status(404).json({ error: '用户不存在' });
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(DEFAULT_RESET_PASSWORD), id);
   res.json({ ok: true, password: DEFAULT_RESET_PASSWORD, user: { id: user.id, username: user.username } });
+});
+
+router.get('/ai-settings', requireAdmin, (_req, res) => {
+  const settings = getAiSettings(db);
+  res.json({ settings, hasApiKey: Boolean(process.env[settings.apiKeyEnv]) });
+});
+
+router.put('/ai-settings', requireAdmin, (req, res) => {
+  const settings = saveAiSettings(db, req.body);
+  res.json({ settings, hasApiKey: Boolean(process.env[settings.apiKeyEnv]) });
 });
 
 module.exports = router;

@@ -35,6 +35,8 @@ SPJ_TIMEOUT_MS=3000
 SPJ_MEMORY_LIMIT_MB=256
 LOGIN_RATE_LIMIT=20
 REGISTER_RATE_LIMIT=10
+XFYUN_API_KEY=
+DEEPSEEK_API_KEY=
 COOKIE_SECURE=auto
 NPM_REGISTRY=https://registry.npmmirror.com
 DOCKER_BUILD_APT_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian
@@ -84,6 +86,8 @@ EOF
   ensure_plain_key SPJ_MEMORY_LIMIT_MB 256
   ensure_plain_key LOGIN_RATE_LIMIT 20
   ensure_plain_key REGISTER_RATE_LIMIT 10
+  ensure_plain_key XFYUN_API_KEY ''
+  ensure_plain_key DEEPSEEK_API_KEY ''
   ensure_plain_key COOKIE_SECURE auto
   ensure_plain_key NPM_REGISTRY https://registry.npmmirror.com
   ensure_plain_key DOCKER_BUILD_APT_MIRROR http://mirrors.tuna.tsinghua.edu.cn/debian

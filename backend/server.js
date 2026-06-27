@@ -15,6 +15,7 @@ const prelimRoutes = require('./routes/prelim');
 const analyticsRoutes = require('./routes/analytics');
 const profileRoutes = require('./routes/profile');
 const tagRoutes = require('./routes/tags');
+const aiRoutes = require('./routes/ai');
 
 migrate();
 initializeTagSystem(db);
@@ -37,6 +38,7 @@ app.use('/api/prelim', prelimRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/tags', tagRoutes);
+app.use('/api/ai', aiRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/judge', express.json({ limit: '20mb' }), judgeRoutes);
 

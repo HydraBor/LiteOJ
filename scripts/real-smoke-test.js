@@ -9,6 +9,9 @@ const root = path.join(__dirname, '..');
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'liteoj-smoke-'));
 const port = 3100 + Math.floor(Math.random() * 1000);
 const env = { ...process.env, DATA_DIR: dataDir, PORT: String(port), NODE_ENV: 'test' };
+process.env.DATA_DIR = dataDir;
+process.env.NODE_ENV = 'test';
+process.env.PORT = String(port);
 
 function failWithOutput(label, result) {
   throw new Error(`${label} failed\nSTDOUT:\n${result.stdout || ''}\nSTDERR:\n${result.stderr || ''}`);
@@ -16,6 +19,7 @@ function failWithOutput(label, result) {
 
 const init = spawnSync(process.execPath, ['scripts/init.js'], { cwd: root, env, encoding: 'utf8' });
 if (init.status !== 0) failWithOutput('init', init);
+const { db: smokeDb } = require('../backend/db');
 
 const server = spawn(process.execPath, ['backend/server.js'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
 let serverLog = '';
@@ -55,7 +59,7 @@ async function request(method, url, body, opts = {}) {
 
 async function main() {
   await waitForServer();
-  for (const route of ['/admin/problem/new', '/admin/problem/P1001/edit', '/admin/problem/P1001/data', '/prelim', '/prelim/mock']) {
+  for (const route of ['/admin/problem/new', '/admin/problem/P1001/edit', '/admin/problem/P1001/data', '/prelim', '/prelim/mock', '/ai', '/admin/ai']) {
     const res = await fetch(`http://127.0.0.1:${port}${route}`);
     assert.strictEqual(res.status, 200, `SPA route ${route} should return index.html`);
     assert((await res.text()).includes('<main id="app"'), `SPA route ${route} should return frontend app shell`);
@@ -67,6 +71,55 @@ async function main() {
   const tagList = await request('GET', '/api/tags?scope=programming');
   assert(tagList.tags.some((tag) => tag.slug === 'simulation' && tag.nameZh === '模拟'), 'tag API should expose canonical programming tags');
   assert(tagList.tags.some((tag) => tag.slug === 'dynamic-programming'), 'tag API should expose dynamic programming');
+
+  const aiSettings = await request('GET', '/api/admin/ai-settings');
+  assert.strictEqual(aiSettings.settings.provider, 'xfyun', 'AI settings should default to Xunfei Xingchen first');
+  assert.strictEqual(aiSettings.settings.defaultModel, 'xopqwen36v35b', 'AI settings should default to Qwen3.6-35B-A3B');
+  const savedAiSettings = await request('PUT', '/api/admin/ai-settings', {
+    enabled: true,
+    provider: 'xfyun',
+    baseUrl: 'https://maas-coding-api.cn-huabei-1.xf-yun.com/v2',
+    defaultModel: 'xopqwen36v35b',
+    maxRequestsPerUserPerDay: 5,
+    maxInputChars: 12000,
+    maxOutputTokens: 512,
+    contextMode: 'recent',
+    contextRecentMessages: 6,
+    blockFullCode: true,
+    directRefusalEnabled: true,
+    maxCodeBlockLines: 12,
+    systemPrompt: aiSettings.settings.systemPrompt,
+  });
+  assert.strictEqual(savedAiSettings.settings.contextMode, 'recent', 'admin should save AI context mode');
+  assert.strictEqual(savedAiSettings.settings.apiKeyEnv, 'XFYUN_API_KEY', 'Xunfei provider should read the XFYUN_API_KEY environment variable');
+  const aiConfig = await request('GET', '/api/ai/config');
+  assert.strictEqual(aiConfig.defaultModel, 'xopqwen36v35b', 'AI user config should expose the selected model but not the key');
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(aiConfig, 'apiKey'), false, 'AI config must not expose the API key');
+  const aiSession = await request('POST', '/api/ai/sessions', { title: '烟测 AI 会话' });
+  assert(aiSession.session.id, 'AI session create should return an id');
+  const renamedAi = await request('PATCH', `/api/ai/sessions/${aiSession.session.id}`, { title: '烟测 AI 会话改名' });
+  assert.strictEqual(renamedAi.session.title, '烟测 AI 会话改名', 'AI session rename should update the title');
+  const aiDetail = await request('GET', `/api/ai/sessions/${aiSession.session.id}`);
+  assert.strictEqual(aiDetail.messages.length, 0, 'new AI session should have no messages');
+  const aiMessageRes = await fetch(`http://127.0.0.1:${port}/api/ai/sessions/${aiSession.session.id}/messages`, {
+    method: 'POST',
+    headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: '你好' }),
+  });
+  assert.strictEqual(aiMessageRes.status, 503, 'AI message should fail clearly when XFYUN_API_KEY is not configured in smoke env');
+  const blockedAiRes = await fetch(`http://127.0.0.1:${port}/api/ai/sessions/${aiSession.session.id}/messages`, {
+    method: 'POST',
+    headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: '你直接给我代码吧' }),
+  });
+  assert.strictEqual(blockedAiRes.status, 200, 'direct full-code request should be intercepted without an upstream API key');
+  assert((await blockedAiRes.text()).includes('我不能直接替你写完整可提交代码'), 'direct refusal stream should include the teaching refusal template');
+  const aiUserName = `ai${Date.now()}`;
+  await request('POST', '/api/auth/register', { username: aiUserName, password: 'aipass1' });
+  const foreignAiRes = await fetch(`http://127.0.0.1:${port}/api/ai/sessions/${aiSession.session.id}`, { headers: { Cookie: cookie } });
+  assert.strictEqual(foreignAiRes.status, 404, 'users must not access another user AI session');
+  await request('POST', '/api/auth/login', { username: 'admin', password: 'admin123' });
+  await request('DELETE', `/api/ai/sessions/${aiSession.session.id}`);
 
   const problemId = `T${Date.now()}`;
   const cloneId = `C${Date.now()}`;
@@ -181,6 +234,15 @@ async function main() {
   assert(submission.submissionId, 'submit should create a submission record');
   const submissions = await request('GET', '/api/submissions');
   assert(submissions.submissions.some((s) => s.id === submission.submissionId), 'submission should appear in submission list');
+  smokeDb.prepare(`UPDATE submissions SET status = 'Accepted', score = 100, time_ms = 9, memory_kb = 2048,
+    message = 'accepted before rejudge', details_json = '[{"status":"AC"}]', updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?`).run(submission.submissionId);
+  const rejudgeProblem = await request('POST', `/api/problems/${encodeURIComponent(problemId)}/rejudge`, {});
+  assert(rejudgeProblem.changed >= 1, 'problem rejudge should reset existing submissions');
+  const rejudgedSubmission = await request('GET', `/api/submissions/${submission.submissionId}`);
+  assert.strictEqual(rejudgedSubmission.submission.status, 'Waiting', 'problem rejudge should set submission back to Waiting');
+  assert.strictEqual(rejudgedSubmission.submission.score, 0, 'problem rejudge should clear the old score');
+  assert.deepStrictEqual(rejudgedSubmission.submission.details, [], 'problem rejudge should clear old case details');
 
   const prelimFacets = await request('GET', '/api/prelim/facets');
   for (const year of [2019, 2020, 2021, 2022, 2023, 2024, 2025]) {
@@ -249,7 +311,7 @@ async function main() {
   await request('POST', '/api/auth/login', { username: resetUserName, password: '123456' });
   const resetMe = await request('GET', '/api/auth/me');
   assert.strictEqual(resetMe.user.username, resetUserName, 'user should be able to login with the reset password');
-  console.log('Real smoke test passed: admin problem flow, submit, prelim/mock flow, and final-round analytics work.');
+  console.log('Real smoke test passed: admin problem flow, submit, AI sessions, prelim/mock flow, and final-round analytics work.');
 }
 
 main().catch((err) => {
@@ -258,5 +320,6 @@ main().catch((err) => {
   process.exitCode = 1;
 }).finally(() => {
   server.kill('SIGTERM');
+  smokeDb.close();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });

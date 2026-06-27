@@ -212,6 +212,37 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_oj_tags_scope ON oj_tags(scope, is_visible, sort_order);
     CREATE INDEX IF NOT EXISTS idx_oj_problem_tags_tag ON oj_problem_tags(tag_slug);
     CREATE INDEX IF NOT EXISTS idx_oj_prelim_question_tags_tag ON oj_prelim_question_tags(tag_slug);
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      title TEXT NOT NULL DEFAULT '新会话',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(session_id) REFERENCES ai_sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ai_sessions_user ON ai_sessions(user_id, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_ai_messages_session ON ai_messages(session_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_ai_messages_user_day ON ai_messages(user_id, role, created_at);
   `);
 
   function tableColumns(table) {
@@ -255,6 +286,8 @@ function migrate() {
   ensureColumn('submissions', 'optimize', 'INTEGER NOT NULL DEFAULT 1');
 
   ensureColumn('prelim_groups', 'section_title', "TEXT NOT NULL DEFAULT ''");
+
+  db.prepare("UPDATE app_settings SET value = 'xopqwen36v35b', updated_at = CURRENT_TIMESTAMP WHERE key = 'ai.default_model' AND value = 'xsparkx2flash'").run();
 
 }
 

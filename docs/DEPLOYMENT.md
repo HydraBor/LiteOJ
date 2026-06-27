@@ -120,6 +120,8 @@ JUDGE_TOKEN=replace-with-long-random-string
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
 COOKIE_SECURE=auto
+XFYUN_API_KEY=
+DEEPSEEK_API_KEY=
 ```
 
 评测变量：
@@ -166,6 +168,28 @@ MAX_JUDGE_QUEUE=500
 - `SPJ_TIMEOUT_MS`：毫秒，checker 单次运行时间。
 - `JUDGE_MAX_OUTPUT_BYTES`：字节，用户程序单个测试点标准输出采集上限，默认 16 MiB。
 - `SPJ_MEMORY_LIMIT_MB`：MB，checker 单次运行内存。
+
+AI 对话变量：
+
+- `XFYUN_API_KEY`：讯飞星辰 API Key，只在服务端环境变量中读取，不写入前端。
+- `DEEPSEEK_API_KEY`：DeepSeek API Key。后续在后台切换到 DeepSeek 服务商时使用。
+- 两个 key 都留空时 `/ai` 页面可打开，但发送消息会提示服务端未配置当前服务商的 API Key；代写拦截模板仍会直接返回，不调用上游模型。
+
+AI 功能开关、默认模型、每日次数、输入长度、输出 token、上下文模式和最近消息数在“后台管理 -> AI 配置”中保存到数据库：
+
+- `ai.enabled`
+- `ai.provider`，默认 `xfyun`
+- `ai.base_url`，讯飞星辰默认 `https://maas-coding-api.cn-huabei-1.xf-yun.com/v2`
+- `ai.default_model`，默认 `xopqwen36v35b`
+- `ai.max_requests_per_user_per_day`
+- `ai.max_input_chars`
+- `ai.max_output_tokens`
+- `ai.context_mode`，取值 `none` 或 `recent`
+- `ai.context_recent_messages`，默认 `6`
+- `ai.system_prompt`
+- `ai.block_full_code`
+- `ai.max_code_block_lines`
+- `ai.direct_refusal_enabled`
 
 ## 管理员账号
 

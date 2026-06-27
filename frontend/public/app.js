@@ -2,6 +2,7 @@ let currentUser = null;
 const app = document.getElementById('app');
 const adminNav = document.getElementById('adminNav');
 const submissionsNav = document.getElementById('submissionsNav');
+const aiNav = document.getElementById('aiNav');
 const userBox = document.getElementById('userBox');
 let submissionPollTimer = null;
 let loginFailureCount = 0;
@@ -22,7 +23,12 @@ function esc(s) {
 }
 
 function jsArg(value) {
-  return JSON.stringify(String(value ?? ''));
+  return `'${String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/</g, '\\x3C')}'`;
 }
 function cssEscape(value) {
   if (window.CSS?.escape) return window.CSS.escape(String(value ?? ''));
@@ -108,6 +114,10 @@ function splitMarkdownTableRow(line) {
 
 function isMarkdownTableAlignRow(cells = []) {
   return cells.length > 0 && cells.every((cell) => /^:?-{2,}:?$/.test(String(cell || '').trim()));
+}
+
+function isMarkdownHorizontalRule(line) {
+  return /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.test(String(line || ''));
 }
 
 function markdownTableAlign(cell) {
@@ -254,6 +264,12 @@ function renderMarkdown(source) {
       continue;
     }
     if (!line.trim()) { flushBlocks(); continue; }
+    if (isMarkdownHorizontalRule(line)) {
+      flushBlocks();
+      pendingTableClass = '';
+      out.push('<hr class="md-hr" />');
+      continue;
+    }
     const heading = line.match(/^(#{1,4})\s+(.+)$/);
     if (heading) {
       flushBlocks();
@@ -588,7 +604,7 @@ function renderPagination(basePath, params, pageData, unit = '条', options = {}
 function setActiveNav() {
   qsa('.main-nav [data-nav]').forEach((btn) => btn.classList.remove('active'));
   const path = location.pathname;
-  const key = path.startsWith('/admin') ? 'admin' : path.startsWith('/analytics') ? 'analytics' : path.startsWith('/prelim/mock') ? 'mock' : path.startsWith('/prelim') ? 'prelim' : path.startsWith('/submissions') || path.startsWith('/submission') ? 'submissions' : 'problems';
+  const key = path.startsWith('/admin') ? 'admin' : path.startsWith('/ai') ? 'ai' : path.startsWith('/analytics') ? 'analytics' : path.startsWith('/prelim/mock') ? 'mock' : path.startsWith('/prelim') ? 'prelim' : path.startsWith('/submissions') || path.startsWith('/submission') ? 'submissions' : 'problems';
   const btn = qs(`.main-nav [data-nav="${key}"]`);
   if (btn) btn.classList.add('active');
 }
@@ -691,6 +707,7 @@ window.addEventListener('popstate', () => {
 
 function setImmersive(on) {
   document.body.classList.toggle('auth-page', Boolean(on));
+  app.classList.remove('ai-container');
 }
 
 async function refreshMe() {
@@ -698,6 +715,7 @@ async function refreshMe() {
   currentUser = data.user;
   adminNav.classList.toggle('hidden', currentUser?.role !== 'admin');
   if (submissionsNav) submissionsNav.classList.toggle('hidden', !currentUser);
+  if (aiNav) aiNav.classList.toggle('hidden', !currentUser);
   if (currentUser) {
     const roleText = currentUser.role === 'admin' ? '管理员' : '普通用户';
     userBox.innerHTML = `${routeAnchor('/profile', `${currentUser.username} · ${roleText}`, 'user-name profile-link')} <button type="button" onclick="logout()">退出</button>`;
@@ -824,6 +842,200 @@ async function renderProfile() {
   };
 }
 
+function aiSessionTitle(session) {
+  return esc(session?.title || '新会话');
+}
+
+function aiMessageHtml(message, id = '') {
+  const role = message.role === 'assistant' ? 'assistant' : 'user';
+  const title = role === 'assistant' ? '小轻' : (currentUser?.username || '我');
+  const body = role === 'assistant' ? renderMarkdown(message.content || '') : renderMarkdown(message.content || '');
+  return `<article class="ai-message ai-message-${role}" ${id ? `id="${esc(id)}"` : ''}>
+    <div class="ai-message-avatar">${role === 'assistant' ? '小轻' : '我'}</div>
+    <div class="ai-message-main">
+      <div class="ai-message-name">${esc(title)}</div>
+      <div class="markdown ai-message-content">${body || '<p></p>'}</div>
+    </div>
+  </article>`;
+}
+
+function aiSessionButton(session, selectedId) {
+  const active = Number(session.id) === Number(selectedId) ? ' active' : '';
+  return `<button type="button" class="ai-session-item${active}" data-route="/ai?session=${esc(session.id)}">
+    <span>${aiSessionTitle(session)}</span>
+    <small>${esc(formatUtc8Time(session.updatedAt))} · ${esc(session.messageCount || 0)} 条</small>
+  </button>`;
+}
+
+function aiWelcomeHtml() {
+  return '<div class="ai-welcome"><div class="ai-welcome-card"><h2>你好，我是小轻👋</h2><p>可以问我编程知识、调试思路，也可以把你的代码发给我一起看。</p></div></div>';
+}
+
+function aiComposerHtml(config, disabledReason) {
+  return `<form id="aiMessageForm" class="ai-input-bar">
+    <textarea name="content" rows="2" maxlength="${esc(config.maxInputChars)}" placeholder="输入消息，支持 Markdown。Shift+Enter 换行，Enter 发送。" ${disabledReason ? 'disabled' : ''}></textarea>
+    <button class="primary" type="submit" ${disabledReason ? 'disabled' : ''}>发送</button>
+  </form>`;
+}
+
+async function createAiSessionAction() {
+  const data = await api('/api/ai/sessions', { method: 'POST', body: { title: '新会话' } });
+  nav(`/ai?session=${data.session.id}`);
+}
+window.createAiSession = () => runUiAction(createAiSessionAction);
+
+async function renameAiSessionAction(id) {
+  const current = qs('.ai-session-title')?.textContent || '新会话';
+  const title = prompt('请输入新的会话名称', current);
+  if (title === null) return;
+  await api(`/api/ai/sessions/${id}`, { method: 'PATCH', body: { title } });
+  await renderAiPage();
+}
+window.renameAiSession = (id) => runUiAction(() => renameAiSessionAction(id));
+
+async function deleteAiSessionAction(id) {
+  if (!confirm('确认删除这个会话？历史消息会一起删除。')) return;
+  await api(`/api/ai/sessions/${id}`, { method: 'DELETE' });
+  nav('/ai');
+}
+window.deleteAiSession = (id) => runUiAction(() => deleteAiSessionAction(id));
+
+function appendAiMessage(message, id = '') {
+  const list = qs('#aiMessages');
+  if (!list) return null;
+  if (qs('.ai-welcome', list)) list.innerHTML = '';
+  list.insertAdjacentHTML('beforeend', aiMessageHtml(message, id));
+  list.scrollTop = list.scrollHeight;
+  return id ? qs(`#${cssEscape(id)}`, list) : list.lastElementChild;
+}
+
+async function readAiEventStream(res, onEvent) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split(/\r?\n\r?\n/);
+    buffer = chunks.pop() || '';
+    chunks.forEach((chunk) => {
+      const event = (chunk.match(/^event:\s*(.+)$/m) || [])[1] || 'message';
+      const dataLine = (chunk.match(/^data:\s*(.+)$/m) || [])[1] || '{}';
+      try { onEvent(event.trim(), JSON.parse(dataLine)); } catch (_) {}
+    });
+  }
+}
+
+async function sendAiMessageAction(sessionId) {
+  let activeSessionId = Number(sessionId) || 0;
+  let form = qs('#aiMessageForm');
+  let textarea = qs('[name="content"]', form);
+  const content = textarea.value.trim();
+  if (!content) return;
+  let button = qs('button[type="submit"]', form);
+  button.disabled = true;
+  textarea.disabled = true;
+  let assistantNode = null;
+  try {
+    if (!activeSessionId) {
+      const data = await api('/api/ai/sessions', { method: 'POST', body: { title: '新会话' } });
+      activeSessionId = data.session.id;
+      history.replaceState(null, '', `/ai?session=${activeSessionId}`);
+      await renderAiPage();
+      form = qs('#aiMessageForm');
+      textarea = qs('[name="content"]', form);
+      button = qs('button[type="submit"]', form);
+      button.disabled = true;
+      textarea.disabled = true;
+    }
+    textarea.value = '';
+    appendAiMessage({ role: 'user', content });
+    const assistantId = `ai-stream-${Date.now()}`;
+    appendAiMessage({ role: 'assistant', content: '' }, assistantId);
+    assistantNode = qs(`#${cssEscape(assistantId)} .ai-message-content`);
+    let assistantContent = '';
+    const res = await fetch(`/api/ai/sessions/${activeSessionId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.detail || res.statusText);
+    }
+    await readAiEventStream(res, (event, data) => {
+      if (event === 'delta') {
+        assistantContent += data.content || '';
+        assistantNode.innerHTML = renderMarkdown(assistantContent);
+        qs('#aiMessages').scrollTop = qs('#aiMessages').scrollHeight;
+      }
+      if (event === 'error') throw new Error(data.error || 'AI 输出中断');
+    });
+  } catch (err) {
+    if (assistantNode) assistantNode.innerHTML = `<div class="error">${esc(err.message || err)}</div>`;
+    else showInlineError('#aiMessageMsg', err);
+  } finally {
+    button.disabled = false;
+    textarea.disabled = false;
+    textarea.focus();
+  }
+}
+window.sendAiMessage = (sessionId) => runUiAction(() => sendAiMessageAction(sessionId));
+
+async function renderAiPage() {
+  setImmersive(false);
+  app.classList.add('ai-container');
+  if (!currentUser) { nav('/login'); return; }
+  const params = new URLSearchParams(location.search);
+  const [config, list] = await Promise.all([api('/api/ai/config'), api('/api/ai/sessions')]);
+  let selectedId = Number(params.get('session') || 0);
+  if (!selectedId && list.sessions?.length) selectedId = list.sessions[0].id;
+  let session = null;
+  let messages = [];
+  if (selectedId) {
+    const detail = await api(`/api/ai/sessions/${selectedId}`);
+    session = detail.session;
+    messages = detail.messages || [];
+  }
+  const disabledReason = !config.enabled ? '你好小轻暂未启用。' : !config.hasApiKey ? `服务器尚未配置 ${config.providerLabel || 'AI'} API Key。` : '';
+  app.innerHTML = `<div class="ai-page">
+    <aside class="ai-sidebar card">
+      <div class="ai-sidebar-head">
+        <h2>会话记录</h2>
+        <button type="button" class="primary" onclick="createAiSession()">新会话</button>
+      </div>
+      <div class="ai-session-list">${(list.sessions || []).map((item) => aiSessionButton(item, selectedId)).join('') || '<p class="muted">暂无会话，点击新建开始。</p>'}</div>
+    </aside>
+    <section class="ai-chat card">
+      ${session ? `<div class="ai-chat-head">
+        <div><h1 class="ai-session-title">${aiSessionTitle(session)}</h1><p class="muted small">${esc(config.providerLabel || 'AI')} · 模型：${esc(config.defaultModel)} · 上下文：${esc(config.contextMode === 'recent' ? `最近 ${config.contextRecentMessages} 条` : '仅当前消息')}</p></div>
+        <div class="row button-row"><button type="button" onclick="renameAiSession(${esc(session.id)})">重命名</button><button type="button" class="danger" onclick="deleteAiSession(${esc(session.id)})">删除</button></div>
+      </div>
+      ${disabledReason ? `<div class="error">${esc(disabledReason)}</div>` : ''}
+      <div id="aiMessages" class="ai-messages">${messages.map((msg) => aiMessageHtml(msg)).join('') || aiWelcomeHtml()}</div>
+      ${aiComposerHtml(config, disabledReason)}
+      <div id="aiMessageMsg" class="ai-message-status"></div>` : `${disabledReason ? `<div class="error">${esc(disabledReason)}</div>` : ''}<div id="aiMessages" class="ai-messages">${aiWelcomeHtml()}</div>${aiComposerHtml(config, disabledReason)}<div id="aiMessageMsg" class="ai-message-status"></div>`}
+    </section>
+  </div>`;
+  const messagesBox = qs('#aiMessages');
+  if (messagesBox) messagesBox.scrollTop = messagesBox.scrollHeight;
+  const form = qs('#aiMessageForm');
+  if (form) {
+    const textarea = qs('[name="content"]', form);
+    textarea.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    form.onsubmit = (event) => {
+      event.preventDefault();
+      sendAiMessage(session?.id || 0);
+    };
+  }
+}
+
 function publicProblemRow(p) {
   return `<tr>
     <td>${problemSubmitStatus(p)}</td>
@@ -846,6 +1058,7 @@ function manageProblemRow(p) {
       <div class="table-action-row" aria-label="题目操作">
         ${routeLink(`/admin/problem/${problemUrl(p.id)}/edit`, '编辑', 'btn table-link-btn')}
         ${routeLink(`/admin/problem/${problemUrl(p.id)}/data`, '数据', 'btn table-link-btn')}
+        <button type="button" data-problem-action="rejudge" data-id="${esc(p.id)}">重测</button>
         <button type="button" data-problem-action="toggle" data-id="${esc(p.id)}" data-public="${p.isPublic ? '0' : '1'}">${p.isPublic ? '隐藏' : '公开'}</button>
         <button type="button" data-problem-action="clone" data-id="${esc(p.id)}">复制</button>
         <button type="button" class="danger" data-problem-action="delete" data-id="${esc(p.id)}">删除</button>
@@ -1598,6 +1811,10 @@ async function renderAdmin() {
         <h2>用户管理</h2>
         <div class="admin-action-buttons">${routeLink('/admin/users', '管理用户', 'btn primary')}</div>
       </div>
+      <div class="admin-action-card">
+        <h2>你好小轻</h2>
+        <div class="admin-action-buttons">${routeLink('/admin/ai', '配置小轻', 'btn primary')}${routeLink('/ai', '打开小轻', 'btn')}</div>
+      </div>
     </div>
   </div>`;
 }
@@ -1638,6 +1855,62 @@ window.resetUserPassword = async (id, username) => runUiAction(async () => {
   alert(`用户 ${username} 的密码已重置为 ${result.password || '123456'}`);
   renderUserAdmin();
 });
+
+async function renderAdminAiSettings() {
+  setImmersive(false);
+  if (currentUser?.role !== 'admin') return renderLogin();
+  const data = await api('/api/admin/ai-settings');
+  const s = data.settings || {};
+  app.innerHTML = `<div class="row space page-head"><div><h1>小轻配置</h1></div><button onclick="nav('/admin')">返回后台</button></div>
+  <div class="card ai-settings-card">
+    <div class="${data.hasApiKey ? 'success' : 'error'}">${data.hasApiKey ? `${esc(s.providerLabel || 'AI')} API Key 已在服务端环境变量 ${esc(s.apiKeyEnv || '')} 中配置。` : `尚未配置 ${esc(s.apiKeyEnv || 'AI_API_KEY')}，你好小轻会返回不可用提示。`}</div>
+    <form id="aiSettingsForm" class="grid two">
+      <label class="checkbox-line"><input type="checkbox" name="enabled" ${s.enabled ? 'checked' : ''} /> 启用你好小轻</label>
+      <label>服务商<select name="provider"><option value="xfyun" ${s.provider === 'xfyun' ? 'selected' : ''}>讯飞星辰</option><option value="deepseek" ${s.provider === 'deepseek' ? 'selected' : ''}>DeepSeek</option></select></label>
+      <label>BASE URL<input name="baseUrl" value="${esc(s.baseUrl || '')}" /></label>
+      <label>默认模型<input name="defaultModel" value="${esc(s.defaultModel || 'xopqwen36v35b')}" /></label>
+      <label>每用户每日最大请求数<input name="maxRequestsPerUserPerDay" type="number" min="1" max="1000" value="${esc(s.maxRequestsPerUserPerDay || 50)}" /></label>
+      <label>最大输入字符数<input name="maxInputChars" type="number" min="100" max="100000" value="${esc(s.maxInputChars || 12000)}" /></label>
+      <label>最大输出 tokens<input name="maxOutputTokens" type="number" min="128" max="32000" value="${esc(s.maxOutputTokens || 2048)}" /></label>
+      <label>上下文模式<select name="contextMode"><option value="none" ${s.contextMode === 'none' ? 'selected' : ''}>none：只发送当前消息</option><option value="recent" ${s.contextMode !== 'none' ? 'selected' : ''}>recent：发送最近消息</option></select></label>
+      <label>最近上下文消息数<input name="contextRecentMessages" type="number" min="0" max="50" value="${esc(s.contextRecentMessages ?? 6)}" /></label>
+      <label class="checkbox-line"><input type="checkbox" name="blockFullCode" ${s.blockFullCode ? 'checked' : ''} /> 启用代写请求拦截</label>
+      <label class="checkbox-line"><input type="checkbox" name="directRefusalEnabled" ${s.directRefusalEnabled ? 'checked' : ''} /> 命中代写时直接返回模板</label>
+      <label>代码片段最大行数<input name="maxCodeBlockLines" type="number" min="1" max="100" value="${esc(s.maxCodeBlockLines || 12)}" /></label>
+      <label class="ai-system-prompt-field">系统提示词<textarea name="systemPrompt" rows="10">${esc(s.systemPrompt || '')}</textarea></label>
+      <div class="form-actions"><button class="primary">保存配置</button></div>
+    </form>
+    <p class="muted small">API Key 只能通过服务端环境变量配置：讯飞星辰使用 <code>XFYUN_API_KEY</code>，DeepSeek 使用 <code>DEEPSEEK_API_KEY</code>。密钥不会保存到数据库，也不会暴露给前端。</p>
+    <div id="aiSettingsMsg"></div>
+  </div>`;
+  qs('#aiSettingsForm').onsubmit = async (event) => {
+    event.preventDefault();
+    const f = formData(event.target);
+    try {
+      await api('/api/admin/ai-settings', {
+        method: 'PUT',
+        body: {
+          enabled: Boolean(event.target.enabled.checked),
+          provider: f.provider,
+          baseUrl: f.baseUrl,
+          defaultModel: f.defaultModel,
+          maxRequestsPerUserPerDay: Number(f.maxRequestsPerUserPerDay),
+          maxInputChars: Number(f.maxInputChars),
+          maxOutputTokens: Number(f.maxOutputTokens),
+          contextMode: f.contextMode,
+          contextRecentMessages: Number(f.contextRecentMessages),
+          blockFullCode: Boolean(event.target.blockFullCode.checked),
+          directRefusalEnabled: Boolean(event.target.directRefusalEnabled.checked),
+          maxCodeBlockLines: Number(f.maxCodeBlockLines),
+          systemPrompt: f.systemPrompt,
+        },
+      });
+      showInlineSuccess('#aiSettingsMsg', 'AI 配置已保存。');
+    } catch (err) {
+      showInlineError('#aiSettingsMsg', err);
+    }
+  };
+}
 
 async function renderProblemManage() {
   setImmersive(false);
@@ -1696,6 +1969,7 @@ function bindProblemManageActions() {
     if (action === 'data') return openProblemData(id);
     if (action === 'toggle') return toggleProblem(id, btn.dataset.public === '1');
     if (action === 'clone') return cloneProblem(id);
+    if (action === 'rejudge') return rejudgeProblem(id);
     if (action === 'delete') return deleteProblem(id);
   });
 }
@@ -2861,10 +3135,15 @@ window.cloneProblem = async (id) => runUiAction(async () => {
   const result = await api(problemApi(id, '/clone'), { method: 'POST', body: { id: newId.trim() } });
   nav(`/admin/problem/${problemUrl(result.problem.id)}/edit`);
 });
-window.rejudgeProblem = async (id) => runUiAction(
-  () => api(problemApi(id, '/rejudge'), { method: 'POST', body: {} }),
-  (result) => alert(`已重置 ${result.changed} 条提交为等待评测。`),
-);
+async function rejudgeProblemAction(id) {
+  if (!confirm(`确认重测 ${id} 的全部提交？`)) return null;
+  const result = await api(problemApi(id, '/rejudge'), { method: 'POST', body: {} });
+  alert(`已重置 ${result.changed} 条提交为等待评测。`);
+  if (location.pathname.startsWith('/admin/problems')) await renderProblemManage();
+  if (location.pathname === `/problem/${problemUrl(id)}`) await renderProblem(id);
+  return result;
+}
+window.rejudgeProblem = (id) => runUiAction(() => rejudgeProblemAction(id));
 
 async function render() {
   try {
@@ -2874,12 +3153,14 @@ async function render() {
     if (path === '/prelim') return await renderPrelimList();
     if (path === '/prelim/mock') return await renderMockHome();
     if (path === '/analytics') return await renderAnalytics();
+    if (path === '/ai') return await renderAiPage();
     if (path === '/login') return await renderLogin();
     if (path === '/register') return await renderRegister();
     if (path === '/profile') return await renderProfile();
     if (path === '/submissions') return await renderSubmissions();
     if (path === '/admin') return await renderAdmin();
     if (path === '/admin/users') return await renderUserAdmin();
+    if (path === '/admin/ai') return await renderAdminAiSettings();
     if (path === '/admin/problems') return await renderProblemManage();
     if (path === '/admin/prelim') return await renderPrelimAdmin();
     if (path === '/admin/prelim/import') return await renderPrelimImport();

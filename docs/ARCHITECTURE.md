@@ -50,6 +50,7 @@ go-judge container
 - `backend/problem-config.js`：题目配置枚举和表单值归一化。
 - `backend/problem-files.js`：题目目录、测试点、附件、checker.cpp 文件路径。
 - `backend/tag-service.js`：统一标签词典、slug 校验、标签关系表同步。
+- `backend/settings.js`：站点配置读写，当前用于 AI 对话参数。
 - `backend/prelim-utils.js`：CSP 初赛 Markdown 解析和题型归一化。
 - `backend/routes/*`：按业务域拆分的 API。
 
@@ -71,7 +72,9 @@ LiteOJ 前端是无构建步骤的单页应用：
 - 初赛题库：`/prelim`
 - 初赛模考：`/prelim/mock`
 - 考点分析：`/analytics`
+- AI 对话：`/ai`
 - 后台：`/admin`
+- AI 配置：`/admin/ai`
 - 题面编辑：`/admin/problem/:id/edit` 和 `/admin/problem/new`
 - 测试数据管理：`/admin/problem/:id/data`
 
@@ -87,6 +90,9 @@ LiteOJ 前端是无构建步骤的单页应用：
 - `oj_tags`：统一标签词典。`slug` 是唯一事实来源，`name_zh` 是唯一中文展示名。
 - `oj_problem_tags`：编程题与标签的关系。
 - `oj_prelim_question_tags`：初赛小题与标签的关系。
+- `app_settings`：后台配置项，包含 `ai.*` 配置。
+- `ai_sessions`：AI 会话，只按 `user_id` 归属到 LiteOJ 用户账号。
+- `ai_messages`：AI 历史消息，只保存 `user` 和 `assistant` 消息正文，不保存长期记忆、摘要或向量数据。
 
 `problems.tags_json` 和 `prelim_questions.tags_json` 仍保留为接口兼容缓存；查询、筛选和数据分析优先使用关系表。
 
@@ -174,6 +180,7 @@ testlib 中 `registerTestlibCmd(argc, argv)` 会据此初始化 `inf`、`ouf`、
 - `/api/prelim`：初赛题库、导入、模考。
 - `/api/analytics`：初赛/复赛考点统计；初赛来自 `prelim_*`，复赛来自公开编程题库和复赛题号解析。
 - `/api/tags`：标签列表、大纲树和 slug 校验。
+- `/api/ai`：登录用户的 AI 会话和流式消息接口。所有会话接口按当前 `user_id` 校验所有权。
 
 具体接口清单见 README。
 
@@ -187,6 +194,8 @@ testlib 中 `registerTestlibCmd(argc, argv)` 会据此初始化 `inf`、`ouf`、
 - 提交入口限制代码大小、提交频率、单用户待评测数量和全局队列数量。
 - 上传测试数据限制 zip 大小和解压总量；手动测试点、附件和单题总存储也有限制。
 - `checker.cpp` 有源码大小限制，运行有独立时空限制。
+- AI 对话 API Key 只从服务端环境变量读取。讯飞星辰使用 `XFYUN_API_KEY`，DeepSeek 使用 `DEEPSEEK_API_KEY`；前端只能看到是否已配置 key，不能读取 key 内容。
+- AI 会话不接入题库、提交记录或标签分析，上游模型请求只发送系统提示词和当前会话上下文。
 
 ## 参考资料
 

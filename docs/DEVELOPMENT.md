@@ -311,6 +311,19 @@ npm run real-smoke
 - 不使用标签权重，只统计标签出现次数；
 - 输出 T1-T4 题位画像、难度分布、题位/考点热力表和题目明细。
 
+## AI 对话开发
+
+AI 对话接口位于 `backend/routes/ai.js`，配置读写位于 `backend/settings.js`。
+
+- API Key 只从服务端环境变量读取：讯飞星辰使用 `XFYUN_API_KEY`，DeepSeek 使用 `DEEPSEEK_API_KEY`；
+- 默认服务商为讯飞星辰，OpenAI 格式 base URL 为 `https://maas-coding-api.cn-huabei-1.xf-yun.com/v2`；
+- 默认模型为讯飞星辰 Qwen3.6-35B-A3B（`xopqwen36v35b`），后续可在后台切换到 DeepSeek 的 `deepseek-v4-flash`；
+- 会话和消息必须按当前 `user_id` 过滤；
+- `ai.context_mode=none` 时只发送 system prompt 和当前用户消息；
+- `ai.context_mode=recent` 时发送 system prompt、当前会话最近 N 条历史消息和当前用户消息；
+- 数据库只保存 `user` / `assistant` 历史消息，不增加摘要、长期记忆或向量数据库。
+- `ai.block_full_code=true` 且命中明显代写请求时，优先直接返回 LiteOJ 拦截模板，不调用上游模型。
+
 ## 前端开发约定
 
 - 不引入构建步骤。

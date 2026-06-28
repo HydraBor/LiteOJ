@@ -7,6 +7,7 @@ const {
   FULL_CODE_POLICY_PROMPT,
   DIRECT_REFUSAL_TEMPLATE,
   looksLikeFullCodeRequest,
+  sanitizeFullCodeOutput,
 } = require('../ai-prompts');
 
 const router = express.Router();
@@ -51,6 +52,10 @@ function todayRequestCount(userId) {
 function sse(res, event, data) {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+function sseStage(res, stage, label) {
+  sse(res, 'stage', { stage, label });
 }
 
 function responseMessages(settings, sessionId, userMessageId, content) {
@@ -114,6 +119,7 @@ function saveAssistantMessage(sessionId, userId, content, model) {
 function streamStaticAssistant(res, sessionId, userId, content, model) {
   const messageId = saveAssistantMessage(sessionId, userId, content, model);
   startSse(res);
+  sseStage(res, 'analysis', '用户请求分析中');
   sse(res, 'delta', { content });
   sse(res, 'done', { messageId, content, model });
   res.end();
@@ -213,19 +219,28 @@ router.post('/sessions/:id/messages', requireLogin, async (req, res) => {
     controller.abort();
   });
 
+  startSse(res);
+  sseStage(res, 'analysis', '用户请求分析中');
+  sseStage(res, 'thinking', '小轻思考中');
+
   let upstream;
   try {
     upstream = await streamOpenAiCompatible({ settings, messages, signal: controller.signal });
   } catch (err) {
-    if (!res.headersSent) return res.status(502).json({ error: `无法连接 ${settings.providerLabel} API`, detail: String(err.message || err) });
+    if (!clientClosed) {
+      sse(res, 'error', { error: `无法连接 ${settings.providerLabel} API`, detail: String(err.message || err) });
+      res.end();
+    }
     return null;
   }
   if (!upstream.ok) {
     const text = await upstream.text().catch(() => '');
-    return res.status(502).json({ error: `${settings.providerLabel} API 请求失败`, detail: text.slice(0, 500) });
+    if (!clientClosed) {
+      sse(res, 'error', { error: `${settings.providerLabel} API 请求失败`, detail: text.slice(0, 500) });
+      res.end();
+    }
+    return null;
   }
-
-  startSse(res);
 
   const decoder = new TextDecoder();
   let lineBuffer = '';
@@ -246,7 +261,7 @@ router.post('/sessions/:id/messages', requireLogin, async (req, res) => {
       const delta = json.choices?.[0]?.delta?.content || '';
       if (delta && !clientClosed) {
         assistantContent += delta;
-        sse(res, 'delta', { content: delta });
+        if (!settings.blockFullCode) sse(res, 'delta', { content: delta });
       }
     } catch (_) {}
   };
@@ -261,8 +276,15 @@ router.post('/sessions/:id/messages', requireLogin, async (req, res) => {
     }
     if (lineBuffer) handleLine(lineBuffer);
     if (!clientClosed) {
-      const messageId = saveAssistantMessage(id, req.user.id, assistantContent, settings.defaultModel);
-      sse(res, 'done', { messageId, content: assistantContent, model: settings.defaultModel });
+      if (settings.blockFullCode) sseStage(res, 'review', '小轻回复审查中');
+      const sanitized = settings.blockFullCode
+        ? sanitizeFullCodeOutput(assistantContent, settings.maxCodeBlockLines)
+        : { content: assistantContent, hiddenCount: 0 };
+      const finalContent = sanitized.content;
+      const finalModel = sanitized.hiddenCount ? 'liteoj-output-sanitized' : settings.defaultModel;
+      const messageId = saveAssistantMessage(id, req.user.id, finalContent, finalModel);
+      if (settings.blockFullCode) sse(res, 'delta', { content: finalContent });
+      sse(res, 'done', { messageId, content: finalContent, model: finalModel });
       res.end();
     }
   } catch (err) {

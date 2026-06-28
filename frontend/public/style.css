@@ -1873,6 +1873,25 @@ a.back-btn:hover { background: #fbfcff; border-color: #cbd3e5; }
   font-weight: 900;
 }
 .ai-message-content p:last-child { margin-bottom: 0; }
+.ai-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: #536073;
+  font-size: 14px;
+  font-weight: 800;
+}
+.ai-loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #dbe6fb;
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  animation: ai-spin .8s linear infinite;
+}
+@keyframes ai-spin {
+  to { transform: rotate(360deg); }
+}
 .ai-input-bar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

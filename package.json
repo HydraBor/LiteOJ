@@ -1,6 +1,6 @@
 {
   "name": "liteoj",
-  "version": "1.4.1",
+  "version": "1.4.3",
   "description": "A lightweight OJ for programming practice, CSP-J/S preliminary question banks, mock exams, and exam-point analytics.",
   "license": "MIT",
   "private": true,

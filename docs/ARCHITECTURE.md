@@ -196,6 +196,7 @@ testlib 中 `registerTestlibCmd(argc, argv)` 会据此初始化 `inf`、`ouf`、
 - `checker.cpp` 有源码大小限制，运行有独立时空限制。
 - AI 对话 API Key 只从服务端环境变量读取。讯飞星辰使用 `XFYUN_API_KEY`，DeepSeek 使用 `DEEPSEEK_API_KEY`；前端只能看到是否已配置 key，不能读取 key 内容。
 - AI 会话不接入题库、提交记录或标签分析，上游模型请求只发送系统提示词和当前会话上下文。
+- AI 助教模式不只依赖提示词：服务端会拦截索要代码意图，并在开启代写拦截时缓冲上游输出后隐藏完整代码片段，再发送给前端。
 
 ## 参考资料
 

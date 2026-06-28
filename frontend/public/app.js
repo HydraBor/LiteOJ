@@ -871,6 +871,10 @@ function aiWelcomeHtml() {
   return '<div class="ai-welcome"><div class="ai-welcome-card"><h2>你好，我是小轻👋</h2><p>可以问我编程知识、调试思路，也可以把你的代码发给我一起看。</p></div></div>';
 }
 
+function aiLoadingHtml(text) {
+  return `<div class="ai-loading" role="status" aria-live="polite"><span class="ai-loading-spinner"></span><span>${esc(text)}</span></div>`;
+}
+
 function aiComposerHtml(config, disabledReason) {
   return `<form id="aiMessageForm" class="ai-input-bar">
     <textarea name="content" rows="2" maxlength="${esc(config.maxInputChars)}" placeholder="输入消息，支持 Markdown。Shift+Enter 换行，Enter 发送。" ${disabledReason ? 'disabled' : ''}></textarea>
@@ -954,6 +958,7 @@ async function sendAiMessageAction(sessionId) {
     const assistantId = `ai-stream-${Date.now()}`;
     appendAiMessage({ role: 'assistant', content: '' }, assistantId);
     assistantNode = qs(`#${cssEscape(assistantId)} .ai-message-content`);
+    assistantNode.innerHTML = aiLoadingHtml('用户请求分析中');
     let assistantContent = '';
     const res = await fetch(`/api/ai/sessions/${activeSessionId}/messages`, {
       method: 'POST',
@@ -965,6 +970,10 @@ async function sendAiMessageAction(sessionId) {
       throw new Error(data.error || data.detail || res.statusText);
     }
     await readAiEventStream(res, (event, data) => {
+      if (event === 'stage') {
+        if (!assistantContent) assistantNode.innerHTML = aiLoadingHtml(data.label || '小轻处理中');
+        return;
+      }
       if (event === 'delta') {
         assistantContent += data.content || '';
         assistantNode.innerHTML = renderMarkdown(assistantContent);

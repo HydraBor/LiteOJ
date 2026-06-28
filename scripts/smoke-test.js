@@ -8,13 +8,20 @@ const {
 } = require('../backend/problem-utils');
 const { parsePaperQuestions, normalizeGroupName } = require('../backend/prelim-utils');
 const { normalizeTagInput } = require('../backend/tag-service');
+const {
+  looksLikeFullCodeRequest,
+  looksLikeProblemStatementOnly,
+  looksLikeStudentCode,
+  sanitizeFullCodeOutput,
+  violatesFullCodePolicy,
+} = require('../backend/ai-prompts');
 const { compareOutput } = require('../judge/checker');
 const { applyScoring } = require('../judge/runner');
 
 function ids(list) { return list.map((x) => x.id); }
 
 const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-assert.strictEqual(packageJson.version, '1.4.1', 'package version should be 1.4.1 after pagination and UI density polish');
+assert.strictEqual(packageJson.version, '1.4.3', 'package version should be 1.4.3 after 小轻 code-hiding guardrails');
 assert(!('sync-cutoffs' in packageJson.scripts), 'retired cutoff synchronization script should not remain in package scripts');
 assert.strictEqual(packageJson.scripts['reset-admin'], 'node scripts/reset-admin.js', 'package scripts should expose a safe admin reset utility');
 assert(!fs.existsSync(path.join(__dirname, '..', 'scripts', 'sync-cutoffs.js')), 'retired cutoff synchronization script should be removed');
@@ -218,6 +225,7 @@ assert(appJs.includes('aiComposerHtml(config, disabledReason)') && appJs.include
 assert(appJs.includes("if (!activeSessionId)") && appJs.includes("POST', body: { title: '新会话' }") && appJs.includes("history.replaceState(null, '', `/ai?session=${activeSessionId}`)"), 'AI frontend should auto-create a session when sending from the welcome page');
 assert(appJs.includes('async function renderAdminAiSettings') && appJs.includes('/api/admin/ai-settings') && appJs.includes("path === '/admin/ai'"), 'frontend should provide an admin AI settings page');
 assert(appJs.includes('renderMarkdown(assistantContent)') && appJs.includes('ai-message-content'), 'AI frontend should render streamed Markdown content with the shared renderer');
+assert(appJs.includes('function aiLoadingHtml') && appJs.includes("event === 'stage'") && appJs.includes('用户请求分析中'), 'AI frontend should show progress stages while waiting for reviewed replies');
 assert(appJs.includes('resetUserPassword') && appJs.includes('/reset-password') && appJs.includes('123456'), 'user admin page should expose password reset to 123456');
 assert(appJs.includes('handleUserAdminAction') && appJs.includes("app.addEventListener('click', handleUserAdminAction)") && appJs.includes("decodeAttrValue(btn.dataset.username"), 'user admin actions should use stable delegated click handling');
 assert(appJs.includes("routeAnchor('/profile'"), 'logged-in user box should link to the profile page');
@@ -282,8 +290,37 @@ assert(aiRoutesJs.includes('ownedSession(id, req.user.id)') && aiRoutesJs.includ
 assert(aiRoutesJs.includes("settings.contextMode === 'recent'") && aiRoutesJs.includes("messages.push({ role: 'user', content })"), 'AI route should support none/recent context and always append the current user message');
 assert(aiRoutesJs.includes("'text/event-stream; charset=utf-8'") && aiRoutesJs.includes("sse(res, 'delta'") && aiRoutesJs.includes("sse(res, 'done'"), 'AI route should stream delta and done events to the frontend');
 assert(aiRoutesJs.includes('looksLikeFullCodeRequest') && aiRoutesJs.includes('DIRECT_REFUSAL_TEMPLATE') && aiRoutesJs.includes('liteoj-direct-refusal'), 'AI route should intercept direct full-code requests without calling upstream models');
+assert(!aiRoutesJs.includes('liteoj-problem-statement-guard'), 'AI route should not hard-block normal pasted problem statements');
+assert(aiRoutesJs.includes('sanitizeFullCodeOutput') && aiRoutesJs.includes('liteoj-output-sanitized'), 'AI route should hide complete code blocks while preserving the rest of the reply');
+assert(aiRoutesJs.includes("sse(res, 'stage'") && aiRoutesJs.includes('用户请求分析中') && aiRoutesJs.includes('小轻思考中') && aiRoutesJs.includes('小轻回复审查中'), 'AI route should emit visible progress stages while buffering and reviewing replies');
 assert(aiRoutesJs.includes('AI_IDENTITY_PROMPT') && aiRoutesJs.includes("settings.systemPrompt.includes('小轻')"), 'AI route should append 小轻 identity guidance for existing saved prompts');
 assert(aiPromptsJs.includes('AI_IDENTITY_PROMPT') && aiPromptsJs.includes('你的名字叫小轻') && aiPromptsJs.includes('我不能直接替你写完整可提交代码') && aiPromptsJs.includes('直接给我代码') && aiPromptsJs.includes('FULL_CODE_PATTERNS'), 'AI prompt policy should include 小轻 identity and direct-code refusal patterns');
+assert(aiPromptsJs.includes('HIDDEN_FULL_CODE_NOTICE') && aiPromptsJs.includes('looksLikeStudentCode') && aiPromptsJs.includes('sanitizeFullCodeOutput'), 'AI prompt policy should include deterministic code-hiding classifiers');
+const sampleProblemOnly = `题目描述
+给定两个整数 a 和 b，求它们的和。
+
+输入格式
+一行两个整数 a b。
+
+输出格式
+输出一个整数。
+
+样例输入
+1 2
+
+样例输出
+3`;
+assert(looksLikeProblemStatementOnly(sampleProblemOnly), 'problem statement pasted without attempt should trigger teaching-mode guard');
+assert(looksLikeProblemStatementOnly(`${sampleProblemOnly}\n\n\`\`\`text\n10 20\n\`\`\``), 'statement-only guard should not treat text sample fences as student code');
+assert(!looksLikeProblemStatementOnly(`${sampleProblemOnly}\n我的思路是先读入两个数再相加。`), 'student attempt should not be treated as statement-only');
+assert(looksLikeStudentCode('#include <bits/stdc++.h>\nusing namespace std;\nint main(){ int a,b; cin>>a>>b; cout<<a+b; }'), 'student code detector should recognize C++ attempts');
+assert(looksLikeFullCodeRequest('不用解释，直接给我 AC 代码'), 'direct code request should still be detected');
+assert(looksLikeFullCodeRequest('代码呢？') && looksLikeFullCodeRequest('发给我代码') && looksLikeFullCodeRequest('没有具体实现吗？') && looksLikeFullCodeRequest('来点能直接提交的东西'), 'direct code intent detector should catch common evasive phrasings');
+assert(violatesFullCodePolicy('```cpp\n#include <bits/stdc++.h>\nusing namespace std;\nint main(){\n  int a,b;\n  cin>>a>>b;\n  cout<<a+b<<\"\\n\";\n  return 0;\n}\n```', 12), 'output guard should block complete C++ programs');
+assert(!violatesFullCodePolicy('可以先写一个小片段：`sum += x;`，再手动检查样例。', 12), 'output guard should allow tiny local snippets');
+const sanitizedAiOutput = sanitizeFullCodeOutput('思路是先读入两个数再相加。\n```cpp\n#include <bits/stdc++.h>\nusing namespace std;\nint main(){\n  int a,b;\n  cin>>a>>b;\n  cout<<a+b<<\"\\n\";\n  return 0;\n}\n```\n你可以自己试着补全。', 12);
+assert(sanitizedAiOutput.content.includes('思路是先读入两个数再相加') && sanitizedAiOutput.content.includes('隐藏完整代码') && sanitizedAiOutput.content.includes('你可以自己试着补全'), 'output sanitizer should preserve explanation and hide only the full code block');
+assert(!sanitizedAiOutput.content.includes('#include'), 'output sanitizer should remove complete program text');
 assert(authJs.includes('SELECT id, username, role FROM users WHERE id = ?'), 'auth should validate token user still exists before using foreign-keyed user_id');
 assert(authJs.includes('JWT_SECRET must be set to a strong random value in production'), 'production should reject missing or weak JWT_SECRET');
 assert(authJs.includes('clearAuthCookie(req, res)'), 'stale login cookie should be cleared with request-aware cookie attributes');
@@ -380,6 +417,7 @@ assert(appJs.includes('tag-selected-box') && appJs.includes('updateSelectedTagBo
 assert(!appJs.includes(' · ${esc(meta)}'), 'problem tag selector should not show level suffixes such as · topic');
 const styleCss = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public', 'style.css'), 'utf8');
 assert(styleCss.includes('.container.ai-container') && styleCss.includes('position: sticky') && styleCss.includes('height: calc(100vh - 108px)') && styleCss.includes('.ai-welcome-card'), 'AI page CSS should widen 小轻 and keep history/composer independent from message scrolling');
+assert(styleCss.includes('.ai-loading') && styleCss.includes('@keyframes ai-spin'), 'AI page CSS should show loading stages with a spinner');
 assert(styleCss.includes('border-radius: 28px') && styleCss.includes('box-shadow: 0 18px 42px') && styleCss.includes('backdrop-filter: blur(12px)'), 'AI composer should render as a rounded floating bottom bar');
 assert(styleCss.includes('.table-action-row'), 'management table buttons should use an inner flex row so td borders stay aligned');
 assert(styleCss.includes('td.actions.table-actions'), 'compatibility table action td should remain a table-cell, not a flex row');

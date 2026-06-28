@@ -323,6 +323,9 @@ AI 对话接口位于 `backend/routes/ai.js`，配置读写位于 `backend/setti
 - `ai.context_mode=recent` 时发送 system prompt、当前会话最近 N 条历史消息和当前用户消息；
 - 数据库只保存 `user` / `assistant` 历史消息，不增加摘要、长期记忆或向量数据库。
 - `ai.block_full_code=true` 且命中明显代写请求时，优先直接返回 LiteOJ 拦截模板，不调用上游模型。
+- 正常粘贴题面不做硬拦截；只有 `looksLikeFullCodeRequest()` 命中索要代码意图时才固定回复并跳过上游。
+- `sanitizeFullCodeOutput()` 会在上游回复完成后检查完整 `main` 程序、超长代码块和“复制提交”式内容；命中时只把对应代码片段替换为“隐藏完整代码”，保留其余解释。
+- 代写拦截开启时不要把上游 token 逐字流给前端，必须先缓冲审查，再发送最终安全内容；等待期间通过 SSE `stage` 事件展示“用户请求分析中 / 小轻思考中 / 小轻回复审查中”。
 
 ## 前端开发约定
 

@@ -125,6 +125,7 @@ const PROBLEM_STATEMENT_ONLY_TEMPLATE = `我看到了你贴的题面。为了让
 先问你一个小问题：这道题的输入里，最关键的变量或条件是什么？`;
 
 const HIDDEN_FULL_CODE_NOTICE = `> 隐藏完整代码：这段内容看起来像完整可提交程序，小轻已隐藏。你可以把自己的代码发来，我会帮你定位错误或给局部修改建议。`;
+const CODE_FENCE_RE = /^```[^\n`]*\s*$/;
 
 const FULL_CODE_KEYWORDS = [
   '直接给代码',
@@ -332,19 +333,93 @@ function hideUnfencedCompleteProgram(content) {
   return { content: hidden || HIDDEN_FULL_CODE_NOTICE, hiddenCount: 1 };
 }
 
-function sanitizeFullCodeOutput(content, maxCodeBlockLines = 12) {
+function hiddenNoticeBlock() {
+  return `\n\n${HIDDEN_FULL_CODE_NOTICE}\n\n`;
+}
+
+function sanitizeFencedCodeBlocks(content, maxCodeBlockLines = 12) {
+  const lines = String(content || '').split(/\r?\n/);
+  const out = [];
   let hiddenCount = 0;
-  let sanitized = String(content || '').replace(/```([^\n`]*)\n?([\s\S]*?)```/g, (raw, lang, code) => {
-    if (!shouldHideCodeBlock(code, maxCodeBlockLines)) return raw;
-    hiddenCount += 1;
-    return HIDDEN_FULL_CODE_NOTICE;
-  });
-  if (!hiddenCount && looksLikeCompleteProgram(sanitized)) {
-    const result = hideUnfencedCompleteProgram(sanitized);
-    sanitized = result.content;
-    hiddenCount += result.hiddenCount;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!CODE_FENCE_RE.test(lines[i].trim())) {
+      out.push(lines[i]);
+      continue;
+    }
+    const start = i;
+    let end = -1;
+    for (let j = i + 1; j < lines.length; j += 1) {
+      if (CODE_FENCE_RE.test(lines[j].trim())) {
+        end = j;
+        break;
+      }
+    }
+    if (end >= 0) {
+      const code = lines.slice(start + 1, end).join('\n');
+      if (shouldHideCodeBlock(code, maxCodeBlockLines)) {
+        out.push(hiddenNoticeBlock());
+        hiddenCount += 1;
+      } else {
+        out.push(...lines.slice(start, end + 1));
+      }
+      i = end;
+      continue;
+    }
+
+    const codeLines = lines.slice(start + 1);
+    if (shouldHideCodeBlock(codeLines.join('\n'), maxCodeBlockLines)) {
+      const markdownStart = codeLines.findIndex((line, index) => index >= 2 && (
+        /^#{1,6}\s+/.test(line.trim())
+        || /^>\s+/.test(line.trim())
+        || /^\*\*[^*]+/.test(line.trim())
+        || /^[\u4e00-\u9fa5].*[。！？：:]/.test(line.trim())
+      ));
+      out.push(hiddenNoticeBlock());
+      hiddenCount += 1;
+      if (markdownStart >= 0) out.push(...codeLines.slice(markdownStart));
+    } else {
+      out.push(...lines.slice(start), '```');
+    }
+    break;
   }
-  return { content: sanitized, hiddenCount };
+  return { content: out.join('\n').replace(/\n{3,}/g, '\n\n').trim(), hiddenCount };
+}
+
+function hideUnfencedCompleteProgramsOutsideFences(content) {
+  const lines = String(content || '').split(/\r?\n/);
+  const out = [];
+  let hiddenCount = 0;
+  let chunk = [];
+  const flushChunk = () => {
+    if (!chunk.length) return;
+    const result = hideUnfencedCompleteProgram(chunk.join('\n'));
+    out.push(result.content);
+    hiddenCount += result.hiddenCount;
+    chunk = [];
+  };
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!CODE_FENCE_RE.test(lines[i].trim())) {
+      chunk.push(lines[i]);
+      continue;
+    }
+    flushChunk();
+    out.push(lines[i]);
+    for (i += 1; i < lines.length; i += 1) {
+      out.push(lines[i]);
+      if (CODE_FENCE_RE.test(lines[i].trim())) break;
+    }
+  }
+  flushChunk();
+  return { content: out.join('\n').replace(/\n{3,}/g, '\n\n').trim(), hiddenCount };
+}
+
+function sanitizeFullCodeOutput(content, maxCodeBlockLines = 12) {
+  const fenced = sanitizeFencedCodeBlocks(content, maxCodeBlockLines);
+  const unfenced = hideUnfencedCompleteProgramsOutsideFences(fenced.content);
+  return {
+    content: unfenced.content,
+    hiddenCount: fenced.hiddenCount + unfenced.hiddenCount,
+  };
 }
 
 module.exports = {

@@ -8,20 +8,14 @@ const {
 } = require('../backend/problem-utils');
 const { parsePaperQuestions, normalizeGroupName } = require('../backend/prelim-utils');
 const { normalizeTagInput } = require('../backend/tag-service');
-const {
-  looksLikeFullCodeRequest,
-  looksLikeProblemStatementOnly,
-  looksLikeStudentCode,
-  sanitizeFullCodeOutput,
-  violatesFullCodePolicy,
-} = require('../backend/ai-prompts');
+const { AI_REVIEW_PROMPT } = require('../backend/ai-prompts');
 const { compareOutput } = require('../judge/checker');
 const { applyScoring } = require('../judge/runner');
 
 function ids(list) { return list.map((x) => x.id); }
 
 const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-assert.strictEqual(packageJson.version, '1.4.4', 'package version should be 1.4.4 after 小轻 code-fence hiding fix');
+assert.strictEqual(packageJson.version, '1.4.6', 'package version should be 1.4.6 after 小轻 streaming two-pass review');
 assert(!('sync-cutoffs' in packageJson.scripts), 'retired cutoff synchronization script should not remain in package scripts');
 assert.strictEqual(packageJson.scripts['reset-admin'], 'node scripts/reset-admin.js', 'package scripts should expose a safe admin reset utility');
 assert(!fs.existsSync(path.join(__dirname, '..', 'scripts', 'sync-cutoffs.js')), 'retired cutoff synchronization script should be removed');
@@ -225,7 +219,11 @@ assert(appJs.includes('aiComposerHtml(config, disabledReason)') && appJs.include
 assert(appJs.includes("if (!activeSessionId)") && appJs.includes("POST', body: { title: '新会话' }") && appJs.includes("history.replaceState(null, '', `/ai?session=${activeSessionId}`)"), 'AI frontend should auto-create a session when sending from the welcome page');
 assert(appJs.includes('async function renderAdminAiSettings') && appJs.includes('/api/admin/ai-settings') && appJs.includes("path === '/admin/ai'"), 'frontend should provide an admin AI settings page');
 assert(appJs.includes('renderMarkdown(assistantContent)') && appJs.includes('ai-message-content'), 'AI frontend should render streamed Markdown content with the shared renderer');
-assert(appJs.includes('function aiLoadingHtml') && appJs.includes("event === 'stage'") && appJs.includes('用户请求分析中'), 'AI frontend should show progress stages while waiting for reviewed replies');
+const retiredAnalysisStageLabel = ['用户请求', '分析中'].join('');
+const retiredReviewStageLabel = ['小轻回复', '审查中'].join('');
+assert(appJs.includes('function aiLoadingHtml') && appJs.includes("event === 'stage'") && appJs.includes('小轻思考中') && !appJs.includes(retiredAnalysisStageLabel), 'AI frontend should show a single thinking state while waiting for reviewed replies');
+assert(appJs.includes('name="reviewEnabled"') && appJs.includes('name="reviewPrompt"') && appJs.includes('二次审查提示词'), 'AI admin page should expose two-pass review settings');
+assert(!appJs.includes('name="blockFullCode"') && !appJs.includes('name="directRefusalEnabled"') && !appJs.includes('name="maxCodeBlockLines"'), 'AI admin page should not expose retired regex/local-code guard settings');
 assert(appJs.includes('resetUserPassword') && appJs.includes('/reset-password') && appJs.includes('123456'), 'user admin page should expose password reset to 123456');
 assert(appJs.includes('handleUserAdminAction') && appJs.includes("app.addEventListener('click', handleUserAdminAction)") && appJs.includes("decodeAttrValue(btn.dataset.username"), 'user admin actions should use stable delegated click handling');
 assert(appJs.includes("routeAnchor('/profile'"), 'logged-in user box should link to the profile page');
@@ -281,50 +279,23 @@ assert(adminRoutesJs.includes("router.post('/users/:id/reset-password'") && admi
 assert(adminRoutesJs.includes("router.get('/ai-settings'") && adminRoutesJs.includes("router.put('/ai-settings'") && adminRoutesJs.includes('saveAiSettings'), 'admin routes should expose AI configuration without exposing API keys');
 const aiPromptsJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'ai-prompts.js'), 'utf8');
 assert(settingsJs.includes("'ai.provider': 'xfyun'") && settingsJs.includes("'ai.default_model': 'xopqwen36v35b'") && settingsJs.includes("'ai.context_mode': 'recent'") && settingsJs.includes("'ai.context_recent_messages': '6'"), 'AI settings should default to Xunfei Xingchen Qwen3.6 with recent context');
+assert(settingsJs.includes("'ai.review_enabled': '1'") && settingsJs.includes("'ai.review_prompt': AI_REVIEW_PROMPT") && settingsJs.includes('reviewPrompt'), 'AI settings should persist second-pass review switch and prompt');
+assert(!settingsJs.includes("'ai.block_full_code'") && !settingsJs.includes("'ai.direct_refusal_enabled'") && !settingsJs.includes("'ai.max_code_block_lines'"), 'AI settings should not keep retired regex/local-code guard defaults');
 assert(dbJsFinal.includes("key = 'ai.default_model'") && dbJsFinal.includes("value = 'xsparkx2flash'") && dbJsFinal.includes("xopqwen36v35b"), 'database migration should upgrade the old Xunfei default model to Qwen3.6');
 assert(settingsJs.includes('AI_PROVIDER_DEFAULTS') && settingsJs.includes('XFYUN_API_KEY') && settingsJs.includes('DEEPSEEK_API_KEY'), 'AI settings should support Xunfei first and keep DeepSeek switchback');
 assert(aiRoutesJs.includes('streamOpenAiCompatible') && aiRoutesJs.includes('/chat/completions') && aiRoutesJs.includes('stream: true'), 'AI route should call OpenAI-compatible chat completions with streaming enabled');
+assert(aiRoutesJs.includes('collectOpenAiStream') && aiRoutesJs.includes('reviewMessages') && aiRoutesJs.includes('settings.reviewEnabled'), 'AI route should perform optional streaming second-pass review through the upstream model');
+assert(aiRoutesJs.includes('【首次回复】') && aiRoutesJs.includes('messages: reviewMessages(settings, assistantContent)'), 'AI second-pass review should use review prompt plus first reply without context history');
 assert(aiRoutesJs.includes("settings.provider === 'xfyun'") && aiRoutesJs.includes('enable_thinking = false'), 'Xunfei streaming should disable reasoning output so the UI receives assistant content directly');
 assert(aiRoutesJs.includes("router.get('/sessions'") && aiRoutesJs.includes("router.post('/sessions'") && aiRoutesJs.includes("router.patch('/sessions/:id'") && aiRoutesJs.includes("router.delete('/sessions/:id'"), 'AI route should support session CRUD');
 assert(aiRoutesJs.includes('ownedSession(id, req.user.id)') && aiRoutesJs.includes("WHERE session_id = ? AND user_id = ?"), 'AI route should scope sessions and messages to the current user');
 assert(aiRoutesJs.includes("settings.contextMode === 'recent'") && aiRoutesJs.includes("messages.push({ role: 'user', content })"), 'AI route should support none/recent context and always append the current user message');
 assert(aiRoutesJs.includes("'text/event-stream; charset=utf-8'") && aiRoutesJs.includes("sse(res, 'delta'") && aiRoutesJs.includes("sse(res, 'done'"), 'AI route should stream delta and done events to the frontend');
-assert(aiRoutesJs.includes('looksLikeFullCodeRequest') && aiRoutesJs.includes('DIRECT_REFUSAL_TEMPLATE') && aiRoutesJs.includes('liteoj-direct-refusal'), 'AI route should intercept direct full-code requests without calling upstream models');
-assert(!aiRoutesJs.includes('liteoj-problem-statement-guard'), 'AI route should not hard-block normal pasted problem statements');
-assert(aiRoutesJs.includes('sanitizeFullCodeOutput') && aiRoutesJs.includes('liteoj-output-sanitized'), 'AI route should hide complete code blocks while preserving the rest of the reply');
-assert(aiRoutesJs.includes("sse(res, 'stage'") && aiRoutesJs.includes('用户请求分析中') && aiRoutesJs.includes('小轻思考中') && aiRoutesJs.includes('小轻回复审查中'), 'AI route should emit visible progress stages while buffering and reviewing replies');
+assert(!aiRoutesJs.includes('looksLikeFullCodeRequest') && !aiRoutesJs.includes('DIRECT_REFUSAL_TEMPLATE') && !aiRoutesJs.includes('sanitizeFullCodeOutput'), 'AI route should not run regex prefilters or local full-code hiding in the two-pass review mode');
+assert(aiRoutesJs.includes("sse(res, 'stage'") && aiRoutesJs.includes('小轻思考中') && !aiRoutesJs.includes(retiredAnalysisStageLabel) && !aiRoutesJs.includes(retiredReviewStageLabel), 'AI route should emit only the unified thinking stage before reviewed deltas stream');
 assert(aiRoutesJs.includes('AI_IDENTITY_PROMPT') && aiRoutesJs.includes("settings.systemPrompt.includes('小轻')"), 'AI route should append 小轻 identity guidance for existing saved prompts');
-assert(aiPromptsJs.includes('AI_IDENTITY_PROMPT') && aiPromptsJs.includes('你的名字叫小轻') && aiPromptsJs.includes('我不能直接替你写完整可提交代码') && aiPromptsJs.includes('直接给我代码') && aiPromptsJs.includes('FULL_CODE_PATTERNS'), 'AI prompt policy should include 小轻 identity and direct-code refusal patterns');
-assert(aiPromptsJs.includes('HIDDEN_FULL_CODE_NOTICE') && aiPromptsJs.includes('looksLikeStudentCode') && aiPromptsJs.includes('sanitizeFullCodeOutput'), 'AI prompt policy should include deterministic code-hiding classifiers');
-const sampleProblemOnly = `题目描述
-给定两个整数 a 和 b，求它们的和。
-
-输入格式
-一行两个整数 a b。
-
-输出格式
-输出一个整数。
-
-样例输入
-1 2
-
-样例输出
-3`;
-assert(looksLikeProblemStatementOnly(sampleProblemOnly), 'problem statement pasted without attempt should trigger teaching-mode guard');
-assert(looksLikeProblemStatementOnly(`${sampleProblemOnly}\n\n\`\`\`text\n10 20\n\`\`\``), 'statement-only guard should not treat text sample fences as student code');
-assert(!looksLikeProblemStatementOnly(`${sampleProblemOnly}\n我的思路是先读入两个数再相加。`), 'student attempt should not be treated as statement-only');
-assert(looksLikeStudentCode('#include <bits/stdc++.h>\nusing namespace std;\nint main(){ int a,b; cin>>a>>b; cout<<a+b; }'), 'student code detector should recognize C++ attempts');
-assert(looksLikeFullCodeRequest('不用解释，直接给我 AC 代码'), 'direct code request should still be detected');
-assert(looksLikeFullCodeRequest('代码呢？') && looksLikeFullCodeRequest('发给我代码') && looksLikeFullCodeRequest('没有具体实现吗？') && looksLikeFullCodeRequest('来点能直接提交的东西'), 'direct code intent detector should catch common evasive phrasings');
-assert(violatesFullCodePolicy('```cpp\n#include <bits/stdc++.h>\nusing namespace std;\nint main(){\n  int a,b;\n  cin>>a>>b;\n  cout<<a+b<<\"\\n\";\n  return 0;\n}\n```', 12), 'output guard should block complete C++ programs');
-assert(!violatesFullCodePolicy('可以先写一个小片段：`sum += x;`，再手动检查样例。', 12), 'output guard should allow tiny local snippets');
-const sanitizedAiOutput = sanitizeFullCodeOutput('思路是先读入两个数再相加。\n```cpp\n#include <bits/stdc++.h>\nusing namespace std;\nint main(){\n  int a,b;\n  cin>>a>>b;\n  cout<<a+b<<\"\\n\";\n  return 0;\n}\n```\n你可以自己试着补全。', 12);
-assert(sanitizedAiOutput.content.includes('思路是先读入两个数再相加') && sanitizedAiOutput.content.includes('隐藏完整代码') && sanitizedAiOutput.content.includes('你可以自己试着补全'), 'output sanitizer should preserve explanation and hide only the full code block');
-assert(!sanitizedAiOutput.content.includes('#include'), 'output sanitizer should remove complete program text');
-assert(!/```cpp\s*> 隐藏完整代码/.test(sanitizedAiOutput.content), 'hidden full-code notice must not remain inside a code fence');
-const sanitizedMixedMarkdown = sanitizeFullCodeOutput('代码示例：\n```cpp\n#include <bits/stdc++.h>\nusing namespace std;\nint main(){\n  int n;\n  cin >> n;\n  cout << n << \"\\n\";\n  return 0;\n}\n```\n#### 3. 性能优化\n可以加入下面两行：\n```cpp\nios::sync_with_stdio(false);\ncin.tie(nullptr);\n```\n继续说明。', 12);
-assert(sanitizedMixedMarkdown.content.includes('#### 3. 性能优化') && sanitizedMixedMarkdown.content.includes('```cpp\nios::sync_with_stdio(false);'), 'sanitizer should keep later Markdown and safe short snippets after hiding a full program');
-assert(!/```cpp\s*> 隐藏完整代码[\s\S]*#### 3/.test(sanitizedMixedMarkdown.content), 'hiding a full program must not swallow following Markdown into the original fence');
+assert(aiPromptsJs.includes('AI_REVIEW_PROMPT') && aiPromptsJs.includes('回复审查器') && aiPromptsJs.includes('【首次回复】') && aiPromptsJs.includes('只输出改写后的最终回复'), 'AI prompt policy should include a strict configurable second-pass review prompt');
+assert(AI_REVIEW_PROMPT.includes('不要输出完整 main 函数') && AI_REVIEW_PROMPT.includes('Markdown 必须保持结构正常'), 'default review prompt should forbid complete programs and preserve Markdown');
 assert(authJs.includes('SELECT id, username, role FROM users WHERE id = ?'), 'auth should validate token user still exists before using foreign-keyed user_id');
 assert(authJs.includes('JWT_SECRET must be set to a strong random value in production'), 'production should reject missing or weak JWT_SECRET');
 assert(authJs.includes('clearAuthCookie(req, res)'), 'stale login cookie should be cleared with request-aware cookie attributes');

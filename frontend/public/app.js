@@ -958,7 +958,7 @@ async function sendAiMessageAction(sessionId) {
     const assistantId = `ai-stream-${Date.now()}`;
     appendAiMessage({ role: 'assistant', content: '' }, assistantId);
     assistantNode = qs(`#${cssEscape(assistantId)} .ai-message-content`);
-    assistantNode.innerHTML = aiLoadingHtml('用户请求分析中');
+    assistantNode.innerHTML = aiLoadingHtml('小轻思考中');
     let assistantContent = '';
     const res = await fetch(`/api/ai/sessions/${activeSessionId}/messages`, {
       method: 'POST',
@@ -1883,10 +1883,9 @@ async function renderAdminAiSettings() {
       <label>最大输出 tokens<input name="maxOutputTokens" type="number" min="128" max="32000" value="${esc(s.maxOutputTokens || 2048)}" /></label>
       <label>上下文模式<select name="contextMode"><option value="none" ${s.contextMode === 'none' ? 'selected' : ''}>none：只发送当前消息</option><option value="recent" ${s.contextMode !== 'none' ? 'selected' : ''}>recent：发送最近消息</option></select></label>
       <label>最近上下文消息数<input name="contextRecentMessages" type="number" min="0" max="50" value="${esc(s.contextRecentMessages ?? 6)}" /></label>
-      <label class="checkbox-line"><input type="checkbox" name="blockFullCode" ${s.blockFullCode ? 'checked' : ''} /> 启用代写请求拦截</label>
-      <label class="checkbox-line"><input type="checkbox" name="directRefusalEnabled" ${s.directRefusalEnabled ? 'checked' : ''} /> 命中代写时直接返回模板</label>
-      <label>代码片段最大行数<input name="maxCodeBlockLines" type="number" min="1" max="100" value="${esc(s.maxCodeBlockLines || 12)}" /></label>
-      <label class="ai-system-prompt-field">系统提示词<textarea name="systemPrompt" rows="10">${esc(s.systemPrompt || '')}</textarea></label>
+      <label class="checkbox-line"><input type="checkbox" name="reviewEnabled" ${s.reviewEnabled ? 'checked' : ''} /> 启用二次审查</label>
+      <label class="ai-system-prompt-field">首次提示词<textarea name="systemPrompt" rows="10">${esc(s.systemPrompt || '')}</textarea></label>
+      <label class="ai-review-prompt-field">二次审查提示词<textarea name="reviewPrompt" rows="10">${esc(s.reviewPrompt || '')}</textarea></label>
       <div class="form-actions"><button class="primary">保存配置</button></div>
     </form>
     <p class="muted small">API Key 只能通过服务端环境变量配置：讯飞星辰使用 <code>XFYUN_API_KEY</code>，DeepSeek 使用 <code>DEEPSEEK_API_KEY</code>。密钥不会保存到数据库，也不会暴露给前端。</p>
@@ -1908,10 +1907,9 @@ async function renderAdminAiSettings() {
           maxOutputTokens: Number(f.maxOutputTokens),
           contextMode: f.contextMode,
           contextRecentMessages: Number(f.contextRecentMessages),
-          blockFullCode: Boolean(event.target.blockFullCode.checked),
-          directRefusalEnabled: Boolean(event.target.directRefusalEnabled.checked),
-          maxCodeBlockLines: Number(f.maxCodeBlockLines),
+          reviewEnabled: Boolean(event.target.reviewEnabled.checked),
           systemPrompt: f.systemPrompt,
+          reviewPrompt: f.reviewPrompt,
         },
       });
       showInlineSuccess('#aiSettingsMsg', 'AI 配置已保存。');

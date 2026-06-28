@@ -1970,10 +1970,12 @@ a.back-btn:hover { background: #fbfcff; border-color: #cbd3e5; }
   line-height: 1.8;
 }
 .ai-settings-card .form-actions { align-self: end; }
-.ai-settings-card .ai-system-prompt-field {
+.ai-settings-card .ai-system-prompt-field,
+.ai-settings-card .ai-review-prompt-field {
   grid-column: 1 / -1;
 }
-.ai-settings-card .ai-system-prompt-field textarea {
+.ai-settings-card .ai-system-prompt-field textarea,
+.ai-settings-card .ai-review-prompt-field textarea {
   min-height: 260px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Microsoft YaHei", monospace;
   line-height: 1.65;

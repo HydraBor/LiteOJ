@@ -1,4 +1,4 @@
-const { LITEOJ_AI_SYSTEM_PROMPT } = require('./ai-prompts');
+const { LITEOJ_AI_SYSTEM_PROMPT, AI_REVIEW_PROMPT } = require('./ai-prompts');
 
 const AI_SETTING_DEFAULTS = {
   'ai.enabled': '1',
@@ -11,9 +11,8 @@ const AI_SETTING_DEFAULTS = {
   'ai.context_mode': 'recent',
   'ai.context_recent_messages': '6',
   'ai.system_prompt': LITEOJ_AI_SYSTEM_PROMPT,
-  'ai.block_full_code': '1',
-  'ai.max_code_block_lines': '12',
-  'ai.direct_refusal_enabled': '1',
+  'ai.review_enabled': '1',
+  'ai.review_prompt': AI_REVIEW_PROMPT,
 };
 
 const AI_PROVIDER_DEFAULTS = {
@@ -86,9 +85,8 @@ function getAiSettings(db) {
     contextMode: raw['ai.context_mode'] === 'none' ? 'none' : 'recent',
     contextRecentMessages: intSetting(raw['ai.context_recent_messages'], 6, 0, 50),
     systemPrompt: String(raw['ai.system_prompt'] || LITEOJ_AI_SYSTEM_PROMPT).trim() || LITEOJ_AI_SYSTEM_PROMPT,
-    blockFullCode: boolSetting(raw['ai.block_full_code']),
-    maxCodeBlockLines: intSetting(raw['ai.max_code_block_lines'], 12, 1, 100),
-    directRefusalEnabled: boolSetting(raw['ai.direct_refusal_enabled']),
+    reviewEnabled: boolSetting(raw['ai.review_enabled']),
+    reviewPrompt: String(raw['ai.review_prompt'] || AI_REVIEW_PROMPT).trim() || AI_REVIEW_PROMPT,
   };
 }
 
@@ -108,9 +106,8 @@ function serializeAiSettings(input = {}) {
     'ai.context_mode': contextMode === 'none' ? 'none' : 'recent',
     'ai.context_recent_messages': String(intSetting(input.contextRecentMessages ?? input.context_recent_messages ?? input['ai.context_recent_messages'], 6, 0, 50)),
     'ai.system_prompt': String(input.systemPrompt || input.system_prompt || input['ai.system_prompt'] || LITEOJ_AI_SYSTEM_PROMPT).trim() || LITEOJ_AI_SYSTEM_PROMPT,
-    'ai.block_full_code': inputBool(input.blockFullCode ?? input.block_full_code ?? input['ai.block_full_code']) ? '1' : '0',
-    'ai.max_code_block_lines': String(intSetting(input.maxCodeBlockLines ?? input.max_code_block_lines ?? input['ai.max_code_block_lines'], 12, 1, 100)),
-    'ai.direct_refusal_enabled': inputBool(input.directRefusalEnabled ?? input.direct_refusal_enabled ?? input['ai.direct_refusal_enabled']) ? '1' : '0',
+    'ai.review_enabled': inputBool(input.reviewEnabled ?? input.review_enabled ?? input['ai.review_enabled']) ? '1' : '0',
+    'ai.review_prompt': String(input.reviewPrompt || input.review_prompt || input['ai.review_prompt'] || AI_REVIEW_PROMPT).trim() || AI_REVIEW_PROMPT,
   };
 }
 

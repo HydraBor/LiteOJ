@@ -85,12 +85,13 @@ async function main() {
     maxOutputTokens: 512,
     contextMode: 'recent',
     contextRecentMessages: 6,
-    blockFullCode: true,
-    directRefusalEnabled: true,
-    maxCodeBlockLines: 12,
+    reviewEnabled: true,
     systemPrompt: aiSettings.settings.systemPrompt,
+    reviewPrompt: aiSettings.settings.reviewPrompt,
   });
   assert.strictEqual(savedAiSettings.settings.contextMode, 'recent', 'admin should save AI context mode');
+  assert.strictEqual(savedAiSettings.settings.reviewEnabled, true, 'admin should save AI second-pass review switch');
+  assert(savedAiSettings.settings.reviewPrompt.includes('回复审查器'), 'admin should save AI second-pass review prompt');
   assert.strictEqual(savedAiSettings.settings.apiKeyEnv, 'XFYUN_API_KEY', 'Xunfei provider should read the XFYUN_API_KEY environment variable');
   const aiConfig = await request('GET', '/api/ai/config');
   assert.strictEqual(aiConfig.defaultModel, 'xopqwen36v35b', 'AI user config should expose the selected model but not the key');
@@ -107,13 +108,6 @@ async function main() {
     body: JSON.stringify({ content: '你好' }),
   });
   assert.strictEqual(aiMessageRes.status, 503, 'AI message should fail clearly when XFYUN_API_KEY is not configured in smoke env');
-  const blockedAiRes = await fetch(`http://127.0.0.1:${port}/api/ai/sessions/${aiSession.session.id}/messages`, {
-    method: 'POST',
-    headers: { Cookie: cookie, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: '你直接给我代码吧' }),
-  });
-  assert.strictEqual(blockedAiRes.status, 200, 'direct full-code request should be intercepted without an upstream API key');
-  assert((await blockedAiRes.text()).includes('我不能直接替你写完整可提交代码'), 'direct refusal stream should include the teaching refusal template');
   const aiUserName = `ai${Date.now()}`;
   await request('POST', '/api/auth/register', { username: aiUserName, password: 'aipass1' });
   const foreignAiRes = await fetch(`http://127.0.0.1:${port}/api/ai/sessions/${aiSession.session.id}`, { headers: { Cookie: cookie } });

@@ -4,10 +4,6 @@ const { requireLogin } = require('../auth');
 const { getAiSettings } = require('../settings');
 const {
   AI_IDENTITY_PROMPT,
-  FULL_CODE_POLICY_PROMPT,
-  DIRECT_REFUSAL_TEMPLATE,
-  looksLikeFullCodeRequest,
-  sanitizeFullCodeOutput,
 } = require('../ai-prompts');
 
 const router = express.Router();
@@ -59,11 +55,8 @@ function sseStage(res, stage, label) {
 }
 
 function responseMessages(settings, sessionId, userMessageId, content) {
-  const limitPrompt = `当前后台配置要求：如需展示代码片段，单个代码片段最多 ${settings.maxCodeBlockLines} 行；不要输出完整可提交程序。`;
   const identityPrompt = settings.systemPrompt.includes('小轻') ? '' : `${AI_IDENTITY_PROMPT}\n\n`;
-  const prompt = settings.blockFullCode
-    ? `${identityPrompt}${settings.systemPrompt}\n\n${limitPrompt}\n\n${FULL_CODE_POLICY_PROMPT}`
-    : `${identityPrompt}${settings.systemPrompt}\n\n${limitPrompt}`;
+  const prompt = `${identityPrompt}${settings.systemPrompt}`;
   const messages = [{ role: 'system', content: prompt }];
   if (settings.contextMode === 'recent' && settings.contextRecentMessages > 0) {
     const recent = db.prepare(`SELECT role, content FROM ai_messages
@@ -73,6 +66,13 @@ function responseMessages(settings, sessionId, userMessageId, content) {
   }
   messages.push({ role: 'user', content });
   return messages;
+}
+
+function reviewMessages(settings, firstReply) {
+  return [{
+    role: 'user',
+    content: `${settings.reviewPrompt}\n\n【首次回复】\n${String(firstReply || '').trim()}`,
+  }];
 }
 
 function currentApiKey(settings) {
@@ -100,6 +100,42 @@ async function streamOpenAiCompatible({ settings, messages, signal }) {
   });
 }
 
+async function collectOpenAiStream(upstream, onDelta, shouldStop = () => false) {
+  const decoder = new TextDecoder();
+  let lineBuffer = '';
+  let content = '';
+  let done = false;
+
+  const handleLine = (line) => {
+    const trimmed = line.trimEnd();
+    if (!trimmed.startsWith('data:')) return;
+    const data = trimmed.slice(5).trim();
+    if (!data) return;
+    if (data === '[DONE]') {
+      done = true;
+      return;
+    }
+    try {
+      const json = JSON.parse(data);
+      const delta = json.choices?.[0]?.delta?.content || '';
+      if (delta && !shouldStop()) {
+        content += delta;
+        onDelta?.(delta);
+      }
+    } catch (_) {}
+  };
+
+  for await (const chunk of upstream.body) {
+    lineBuffer += decoder.decode(chunk, { stream: true });
+    const lines = lineBuffer.split(/\r?\n/);
+    lineBuffer = lines.pop() || '';
+    lines.forEach(handleLine);
+    if (done || shouldStop()) break;
+  }
+  if (lineBuffer && !shouldStop()) handleLine(lineBuffer);
+  return content;
+}
+
 function startSse(res) {
   res.status(200);
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -114,15 +150,6 @@ function saveAssistantMessage(sessionId, userId, content, model) {
     VALUES (?, ?, 'assistant', ?, ?)`).run(sessionId, userId, content, model);
   db.prepare('UPDATE ai_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?').run(sessionId, userId);
   return info.lastInsertRowid;
-}
-
-function streamStaticAssistant(res, sessionId, userId, content, model) {
-  const messageId = saveAssistantMessage(sessionId, userId, content, model);
-  startSse(res);
-  sseStage(res, 'analysis', '用户请求分析中');
-  sse(res, 'delta', { content });
-  sse(res, 'done', { messageId, content, model });
-  res.end();
 }
 
 router.get('/config', requireLogin, (_req, res) => {
@@ -202,11 +229,6 @@ router.post('/sessions/:id/messages', requireLogin, async (req, res) => {
   });
   const userMessageId = tx();
 
-  if (settings.blockFullCode && settings.directRefusalEnabled && looksLikeFullCodeRequest(content)) {
-    streamStaticAssistant(res, id, req.user.id, DIRECT_REFUSAL_TEMPLATE, 'liteoj-direct-refusal');
-    return null;
-  }
-
   if (!currentApiKey(settings)) return res.status(503).json({ error: `服务器未配置 ${settings.apiKeyEnv}` });
 
   const messages = responseMessages(settings, id, userMessageId, content);
@@ -220,7 +242,6 @@ router.post('/sessions/:id/messages', requireLogin, async (req, res) => {
   });
 
   startSse(res);
-  sseStage(res, 'analysis', '用户请求分析中');
   sseStage(res, 'thinking', '小轻思考中');
 
   let upstream;
@@ -242,48 +263,37 @@ router.post('/sessions/:id/messages', requireLogin, async (req, res) => {
     return null;
   }
 
-  const decoder = new TextDecoder();
-  let lineBuffer = '';
-  let assistantContent = '';
-  let done = false;
-
-  const handleLine = (line) => {
-    const trimmed = line.trimEnd();
-    if (!trimmed.startsWith('data:')) return;
-    const data = trimmed.slice(5).trim();
-    if (!data) return;
-    if (data === '[DONE]') {
-      done = true;
-      return;
-    }
-    try {
-      const json = JSON.parse(data);
-      const delta = json.choices?.[0]?.delta?.content || '';
-      if (delta && !clientClosed) {
-        assistantContent += delta;
-        if (!settings.blockFullCode) sse(res, 'delta', { content: delta });
-      }
-    } catch (_) {}
-  };
-
   try {
-    for await (const chunk of upstream.body) {
-      lineBuffer += decoder.decode(chunk, { stream: true });
-      const lines = lineBuffer.split(/\r?\n/);
-      lineBuffer = lines.pop() || '';
-      lines.forEach(handleLine);
-      if (done || clientClosed) break;
-    }
-    if (lineBuffer) handleLine(lineBuffer);
+    const assistantContent = await collectOpenAiStream(upstream, (delta) => {
+      if (!settings.reviewEnabled && !clientClosed) sse(res, 'delta', { content: delta });
+    }, () => clientClosed);
+
     if (!clientClosed) {
-      if (settings.blockFullCode) sseStage(res, 'review', '小轻回复审查中');
-      const sanitized = settings.blockFullCode
-        ? sanitizeFullCodeOutput(assistantContent, settings.maxCodeBlockLines)
-        : { content: assistantContent, hiddenCount: 0 };
-      const finalContent = sanitized.content;
-      const finalModel = sanitized.hiddenCount ? 'liteoj-output-sanitized' : settings.defaultModel;
+      let finalContent = assistantContent;
+      let finalModel = settings.defaultModel;
+      if (settings.reviewEnabled) {
+        let reviewUpstream;
+        try {
+          reviewUpstream = await streamOpenAiCompatible({
+            settings,
+            messages: reviewMessages(settings, assistantContent),
+            signal: controller.signal,
+          });
+        } catch (err) {
+          throw new Error(`无法连接 ${settings.providerLabel} 二次审查 API：${String(err.message || err)}`);
+        }
+        if (!reviewUpstream.ok) {
+          const text = await reviewUpstream.text().catch(() => '');
+          throw new Error(`${settings.providerLabel} 二次审查请求失败：${text.slice(0, 500)}`);
+        }
+        finalContent = await collectOpenAiStream(reviewUpstream, (delta) => {
+          if (!clientClosed) sse(res, 'delta', { content: delta });
+        }, () => clientClosed);
+        if (clientClosed) return null;
+        if (!finalContent.trim()) throw new Error(`${settings.providerLabel} 二次审查返回空内容`);
+        finalModel = `${settings.defaultModel}:review`;
+      }
       const messageId = saveAssistantMessage(id, req.user.id, finalContent, finalModel);
-      if (settings.blockFullCode) sse(res, 'delta', { content: finalContent });
       sse(res, 'done', { messageId, content: finalContent, model: finalModel });
       res.end();
     }

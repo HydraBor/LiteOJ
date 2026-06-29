@@ -238,6 +238,7 @@ const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public
 assert(indexHtml.includes('/logo.svg'), 'index.html should apply the full logo');
 assert(indexHtml.includes('/logo-mark.svg'), 'index.html should apply the favicon mark');
 assert(indexHtml.includes('id="aiNav"') && indexHtml.includes('data-route="/ai"') && indexHtml.includes('你好小轻'), 'main navigation should expose the 小轻 page to logged-in users');
+assert(indexHtml.includes('赣ICP备2026014191号') && indexHtml.includes('https://beian.miit.gov.cn/') && indexHtml.includes('class="site-footer"'), 'index.html should display the ICP filing footer with the MIIT link');
 assert(fs.existsSync(path.join(__dirname, '..', 'frontend', 'public', 'logo.svg')), 'full logo SVG should exist');
 assert(fs.existsSync(path.join(__dirname, '..', 'frontend', 'public', 'logo-mark.svg')), 'logo mark SVG should exist');
 const logoMark = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public', 'logo-mark.svg'), 'utf8');
@@ -391,6 +392,7 @@ assert(appJs.includes('tag-search-input') && appJs.includes('tag-check-option') 
 assert(appJs.includes('tag-selected-box') && appJs.includes('updateSelectedTagBox') && appJs.includes('data-remove-tag'), 'problem editor should show and maintain selected tag chips');
 assert(!appJs.includes(' · ${esc(meta)}'), 'problem tag selector should not show level suffixes such as · topic');
 const styleCss = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public', 'style.css'), 'utf8');
+assert(styleCss.includes('.site-footer') && styleCss.includes('flex-shrink: 0') && styleCss.includes('.site-footer a:hover'), 'stylesheet should keep the ICP filing footer visible and clickable');
 assert(styleCss.includes('.container.ai-container') && styleCss.includes('position: sticky') && styleCss.includes('height: calc(100vh - 108px)') && styleCss.includes('.ai-welcome-card'), 'AI page CSS should widen 小轻 and keep history/composer independent from message scrolling');
 assert(styleCss.includes('.ai-loading') && styleCss.includes('@keyframes ai-spin'), 'AI page CSS should show loading stages with a spinner');
 assert(styleCss.includes('border-radius: 28px') && styleCss.includes('box-shadow: 0 18px 42px') && styleCss.includes('backdrop-filter: blur(12px)'), 'AI composer should render as a rounded floating bottom bar');

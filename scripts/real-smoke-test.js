@@ -75,6 +75,7 @@ async function main() {
   const aiSettings = await request('GET', '/api/admin/ai-settings');
   assert.strictEqual(aiSettings.settings.provider, 'xfyun', 'AI settings should default to Xunfei Xingchen first');
   assert.strictEqual(aiSettings.settings.defaultModel, 'xopqwen36v35b', 'AI settings should default to Qwen3.6-35B-A3B');
+  assert.strictEqual(aiSettings.settings.maxHistoryMbPerUser, 5, 'AI history quota should default to 5 MB per user');
   const savedAiSettings = await request('PUT', '/api/admin/ai-settings', {
     enabled: true,
     provider: 'xfyun',
@@ -83,6 +84,7 @@ async function main() {
     maxRequestsPerUserPerDay: 5,
     maxInputChars: 12000,
     maxOutputTokens: 512,
+    maxHistoryMbPerUser: 5,
     contextMode: 'recent',
     contextRecentMessages: 6,
     reviewEnabled: true,
@@ -90,13 +92,16 @@ async function main() {
     reviewPrompt: aiSettings.settings.reviewPrompt,
   });
   assert.strictEqual(savedAiSettings.settings.contextMode, 'recent', 'admin should save AI context mode');
+  assert.strictEqual(savedAiSettings.settings.maxHistoryMbPerUser, 5, 'admin should save AI history quota');
   assert.strictEqual(savedAiSettings.settings.reviewEnabled, true, 'admin should save AI second-pass review switch');
   assert(savedAiSettings.settings.reviewPrompt.includes('回复审查器'), 'admin should save AI second-pass review prompt');
   assert.strictEqual(savedAiSettings.settings.apiKeyEnv, 'XFYUN_API_KEY', 'Xunfei provider should read the XFYUN_API_KEY environment variable');
   const aiConfig = await request('GET', '/api/ai/config');
   assert.strictEqual(aiConfig.defaultModel, 'xopqwen36v35b', 'AI user config should expose the selected model but not the key');
+  assert.strictEqual(aiConfig.historyLimitBytes, 5 * 1024 * 1024, 'AI user config should expose history quota bytes');
   assert.strictEqual(Object.prototype.hasOwnProperty.call(aiConfig, 'apiKey'), false, 'AI config must not expose the API key');
   const aiSession = await request('POST', '/api/ai/sessions', { title: '烟测 AI 会话' });
+  const aiSession2 = await request('POST', '/api/ai/sessions', { title: '烟测 AI 会话 2' });
   assert(aiSession.session.id, 'AI session create should return an id');
   const renamedAi = await request('PATCH', `/api/ai/sessions/${aiSession.session.id}`, { title: '烟测 AI 会话改名' });
   assert.strictEqual(renamedAi.session.title, '烟测 AI 会话改名', 'AI session rename should update the title');
@@ -113,7 +118,8 @@ async function main() {
   const foreignAiRes = await fetch(`http://127.0.0.1:${port}/api/ai/sessions/${aiSession.session.id}`, { headers: { Cookie: cookie } });
   assert.strictEqual(foreignAiRes.status, 404, 'users must not access another user AI session');
   await request('POST', '/api/auth/login', { username: 'admin', password: 'admin123' });
-  await request('DELETE', `/api/ai/sessions/${aiSession.session.id}`);
+  const deletedAi = await request('POST', '/api/ai/sessions/batch-delete', { ids: [aiSession.session.id, aiSession2.session.id] });
+  assert.strictEqual(deletedAi.deleted, 2, 'AI batch delete should remove selected owned sessions');
 
   const problemId = `T${Date.now()}`;
   const cloneId = `C${Date.now()}`;
@@ -280,6 +286,9 @@ async function main() {
   assert.strictEqual(oldFinalRes.status, 404, 'old problem id should no longer exist after rename');
   const prelimItems = await request('GET', '/api/prelim/items');
   assert(prelimItems.items.length > 0, 'prelim item list should work');
+  const prelim2023 = await request('GET', '/api/prelim/items?keyword=2023');
+  assert(prelim2023.items.length > 1, 'prelim keyword search should match all items from a searched year');
+  assert(prelim2023.items.every((item) => Number(item.year) === 2023), 'prelim keyword year search should return 2023 items');
   const mockPapers = await request('GET', '/api/prelim/mock/papers');
   assert(mockPapers.papers.length > 0, 'mock paper list should work');
   assert(mockPapers.papers[0].title.includes('真题卷') && !mockPapers.papers[0].title.includes('模拟卷'), 'mock paper list should name source papers as true papers');

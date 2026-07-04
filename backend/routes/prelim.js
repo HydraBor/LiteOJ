@@ -76,8 +76,33 @@ function selectGroups(req, adminMode = false) {
   }
   if (req.query.keyword) {
     const kw = `%${String(req.query.keyword).trim()}%`;
-    where.push(`(g.title LIKE ? OR g.stem LIKE ? OR g.code LIKE ? OR EXISTS (SELECT 1 FROM prelim_questions kq WHERE kq.group_id = g.id AND (kq.stem LIKE ? OR kq.explanation LIKE ?)))`);
-    params.push(kw, kw, kw, kw, kw);
+    where.push(`(
+      CAST(p.year AS TEXT) LIKE ?
+      OR p.title LIKE ?
+      OR p.group_name LIKE ?
+      OR p.round_name LIKE ?
+      OR g.title LIKE ?
+      OR g.section_title LIKE ?
+      OR g.group_no LIKE ?
+      OR g.stem LIKE ?
+      OR g.code LIKE ?
+      OR EXISTS (
+        SELECT 1 FROM prelim_questions kq
+        WHERE kq.group_id = g.id AND (
+          CAST(kq.number AS TEXT) LIKE ?
+          OR kq.question_type LIKE ?
+          OR kq.stem LIKE ?
+          OR kq.options_json LIKE ?
+          OR kq.explanation LIKE ?
+          OR EXISTS (
+            SELECT 1 FROM oj_prelim_question_tags kqt
+            JOIN oj_tags kt ON kt.slug = kqt.tag_slug
+            WHERE kqt.question_id = kq.id AND (kt.slug LIKE ? OR kt.name_zh LIKE ?)
+          )
+        )
+      )
+    )`);
+    params.push(kw, kw, kw, kw, kw, kw, kw, kw, kw, kw, kw, kw, kw, kw, kw, kw);
   }
   if (userId && req.query.status) {
     if (req.query.status === 'correct') where.push(`(SELECT COUNT(*) FROM prelim_questions sq WHERE sq.group_id = g.id AND (${latestUserResultSql(userId, 'sq.id')}) = 1) = (SELECT COUNT(*) FROM prelim_questions sq2 WHERE sq2.group_id = g.id)`);

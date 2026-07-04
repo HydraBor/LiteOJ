@@ -45,6 +45,43 @@ function todayRequestCount(userId) {
     WHERE user_id = ? AND role = 'user' AND date(created_at, '+8 hours') = date('now', '+8 hours')`).get(userId).c;
 }
 
+function textBytes(value) {
+  return Buffer.byteLength(String(value || ''), 'utf8');
+}
+
+function userHistoryUsedBytes(userId) {
+  const row = db.prepare(`SELECT COALESCE(SUM(length(CAST(content AS BLOB))), 0) AS bytes
+    FROM ai_messages WHERE user_id = ?`).get(userId);
+  return Number(row?.bytes || 0);
+}
+
+function quotaInfo(userId, settings) {
+  const limit = Number(settings.historyLimitBytesPerUser || 0);
+  const used = userHistoryUsedBytes(userId);
+  return {
+    historyUsedBytes: used,
+    historyLimitBytes: limit,
+    historyRemainingBytes: Math.max(0, limit - used),
+    historyUsagePercent: limit > 0 ? Math.min(100, Math.round((used / limit) * 1000) / 10) : 0,
+  };
+}
+
+function ensureHistoryQuota(userId, settings, extraBytes) {
+  const quota = quotaInfo(userId, settings);
+  if (quota.historyLimitBytes > 0 && quota.historyUsedBytes + Number(extraBytes || 0) > quota.historyLimitBytes) {
+    const err = new Error('小轻历史记录空间已满，请删除部分旧会话后再继续。');
+    err.status = 413;
+    err.quota = quota;
+    throw err;
+  }
+  return quota;
+}
+
+function cleanSessionIds(value) {
+  const ids = Array.isArray(value) ? value : [];
+  return [...new Set(ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))].slice(0, 200);
+}
+
 function sse(res, event, data) {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -164,6 +201,8 @@ router.get('/config', requireLogin, (_req, res) => {
     contextMode: settings.contextMode,
     contextRecentMessages: settings.contextRecentMessages,
     hasApiKey: Boolean(currentApiKey(settings)),
+    maxHistoryMbPerUser: settings.maxHistoryMbPerUser,
+    ...quotaInfo(_req.user.id, settings),
   });
 });
 
@@ -206,7 +245,15 @@ router.delete('/sessions/:id', requireLogin, (req, res) => {
   const id = Number(req.params.id);
   const info = db.prepare('DELETE FROM ai_sessions WHERE id = ? AND user_id = ?').run(id, req.user.id);
   if (!info.changes) return res.status(404).json({ error: 'AI 会话不存在' });
-  res.json({ ok: true });
+  res.json({ ok: true, quota: quotaInfo(req.user.id, getAiSettings(db)) });
+});
+
+router.post('/sessions/batch-delete', requireLogin, (req, res) => {
+  const ids = cleanSessionIds(req.body.ids);
+  if (!ids.length) return res.status(400).json({ error: '请先选择要删除的会话' });
+  const placeholders = ids.map(() => '?').join(',');
+  const info = db.prepare(`DELETE FROM ai_sessions WHERE user_id = ? AND id IN (${placeholders})`).run(req.user.id, ...ids);
+  res.json({ ok: true, deleted: info.changes, quota: quotaInfo(req.user.id, getAiSettings(db)) });
 });
 
 router.post('/sessions/:id/messages', requireLogin, async (req, res) => {
@@ -220,6 +267,13 @@ router.post('/sessions/:id/messages', requireLogin, async (req, res) => {
   if (!content) return res.status(400).json({ error: '消息不能为空' });
   if (content.length > settings.maxInputChars) return res.status(400).json({ error: `消息过长，最多 ${settings.maxInputChars} 个字符` });
   if (todayRequestCount(req.user.id) >= settings.maxRequestsPerUserPerDay) return res.status(429).json({ error: '今日 AI 请求次数已用完' });
+  if (!currentApiKey(settings)) return res.status(503).json({ error: `服务器未配置 ${settings.apiKeyEnv}` });
+  try {
+    const reserveAssistantBytes = Math.max(8192, settings.maxOutputTokens * 8);
+    ensureHistoryQuota(req.user.id, settings, textBytes(content) + reserveAssistantBytes);
+  } catch (err) {
+    return res.status(err.status || 413).json({ error: err.message, ...(err.quota || {}) });
+  }
 
   const tx = db.transaction(() => {
     const info = db.prepare(`INSERT INTO ai_messages (session_id, user_id, role, content, model)
@@ -228,8 +282,6 @@ router.post('/sessions/:id/messages', requireLogin, async (req, res) => {
     return info.lastInsertRowid;
   });
   const userMessageId = tx();
-
-  if (!currentApiKey(settings)) return res.status(503).json({ error: `服务器未配置 ${settings.apiKeyEnv}` });
 
   const messages = responseMessages(settings, id, userMessageId, content);
 

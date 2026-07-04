@@ -321,7 +321,8 @@ AI 对话接口位于 `backend/routes/ai.js`，配置读写位于 `backend/setti
 - 会话和消息必须按当前 `user_id` 过滤；
 - `ai.context_mode=none` 时只发送 system prompt 和当前用户消息；
 - `ai.context_mode=recent` 时发送 system prompt、当前会话最近 N 条历史消息和当前用户消息；
-- 数据库只保存 `user` / `assistant` 历史消息，不增加摘要、长期记忆或向量数据库。
+- 数据库只保存 `user` / `assistant` 历史消息，不增加摘要、长期记忆或向量数据库；
+- `ai.max_history_mb_per_user` 默认 `5`，后端按当前用户所有 AI 消息正文的 UTF-8 字节数执行配额，单删或批量删除会话会释放额度。
 - `ai.review_enabled=true` 时，首次回复只在服务端缓冲，不先展示给学生；
 - 二次审查请求只发送 `reviewPrompt + 【首次回复】`，不发送原会话上下文；
 - 二次审查结果通过 SSE `delta` 实时输出，完成后保存审查后的最终回复；

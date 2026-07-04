@@ -92,7 +92,7 @@ LiteOJ 前端是无构建步骤的单页应用：
 - `oj_prelim_question_tags`：初赛小题与标签的关系。
 - `app_settings`：后台配置项，包含 `ai.*` 配置。
 - `ai_sessions`：AI 会话，只按 `user_id` 归属到 LiteOJ 用户账号。
-- `ai_messages`：AI 历史消息，只保存 `user` 和 `assistant` 消息正文，不保存长期记忆、摘要或向量数据。
+- `ai_messages`：AI 历史消息，只保存 `user` 和 `assistant` 消息正文，不保存长期记忆、摘要或向量数据；服务端按用户统计正文 UTF-8 字节数并执行历史空间配额。
 
 `problems.tags_json` 和 `prelim_questions.tags_json` 仍保留为接口兼容缓存；查询、筛选和数据分析优先使用关系表。
 
@@ -196,6 +196,7 @@ testlib 中 `registerTestlibCmd(argc, argv)` 会据此初始化 `inf`、`ouf`、
 - `checker.cpp` 有源码大小限制，运行有独立时空限制。
 - AI 对话 API Key 只从服务端环境变量读取。讯飞星辰使用 `XFYUN_API_KEY`，DeepSeek 使用 `DEEPSEEK_API_KEY`；前端只能看到是否已配置 key，不能读取 key 内容。
 - AI 会话不接入题库、提交记录或标签分析，上游模型请求只发送系统提示词和当前会话上下文。
+- AI 历史空间默认每用户 5MB，可在后台通过 `ai.max_history_mb_per_user` 调整；删除单个或批量删除会话会释放该用户的历史额度。
 - AI 助教模式使用两段提示词：首次提示词随用户消息和最近上下文发送；启用二次审查时，首次回复会在服务端缓冲，再用“二次审查提示词 + 首次回复”单独调用上游模型，不携带上下文，最终只展示审查后的回复。
 
 ## 参考资料

@@ -219,10 +219,11 @@ assert(appJs.includes('aiComposerHtml(config, disabledReason)') && appJs.include
 assert(appJs.includes("if (!activeSessionId)") && appJs.includes("POST', body: { title: '新会话' }") && appJs.includes("history.replaceState(null, '', `/ai?session=${activeSessionId}`)"), 'AI frontend should auto-create a session when sending from the welcome page');
 assert(appJs.includes('async function renderAdminAiSettings') && appJs.includes('/api/admin/ai-settings') && appJs.includes("path === '/admin/ai'"), 'frontend should provide an admin AI settings page');
 assert(appJs.includes('renderMarkdown(assistantContent)') && appJs.includes('ai-message-content'), 'AI frontend should render streamed Markdown content with the shared renderer');
+assert(appJs.includes('aiStorageMeter(config)') && appJs.includes('deleteSelectedAiSessionsAction') && appJs.includes('aiMultiSelectBtn') && appJs.includes('setAiMultiSelectMode'), 'AI frontend should show per-user history quota and enter batch deletion through an explicit multi-select mode');
 const retiredAnalysisStageLabel = ['用户请求', '分析中'].join('');
 const retiredReviewStageLabel = ['小轻回复', '审查中'].join('');
 assert(appJs.includes('function aiLoadingHtml') && appJs.includes("event === 'stage'") && appJs.includes('小轻思考中') && !appJs.includes(retiredAnalysisStageLabel), 'AI frontend should show a single thinking state while waiting for reviewed replies');
-assert(appJs.includes('name="reviewEnabled"') && appJs.includes('name="reviewPrompt"') && appJs.includes('二次审查提示词'), 'AI admin page should expose two-pass review settings');
+assert(appJs.includes('name="reviewEnabled"') && appJs.includes('name="reviewPrompt"') && appJs.includes('二次审查提示词') && appJs.includes('name="maxHistoryMbPerUser"'), 'AI admin page should expose two-pass review settings and history quota');
 assert(!appJs.includes('name="blockFullCode"') && !appJs.includes('name="directRefusalEnabled"') && !appJs.includes('name="maxCodeBlockLines"'), 'AI admin page should not expose retired regex/local-code guard settings');
 assert(appJs.includes('resetUserPassword') && appJs.includes('/reset-password') && appJs.includes('123456'), 'user admin page should expose password reset to 123456');
 assert(appJs.includes('handleUserAdminAction') && appJs.includes("app.addEventListener('click', handleUserAdminAction)") && appJs.includes("decodeAttrValue(btn.dataset.username"), 'user admin actions should use stable delegated click handling');
@@ -232,6 +233,7 @@ assert(appJs.includes('clearSubmissionPoll') && appJs.includes('location.pathnam
 assert(appJs.includes('function formatUtc8Time') && appJs.includes('UTC+8'), 'submission times should be formatted explicitly as UTC+8');
 assert(appJs.includes('DEFAULT_PAGE_SIZE = 20') && appJs.includes('PAGE_SIZE_OPTIONS = [10, 20, 50, 100]'), 'list pagination should default to 20 rows and expose stable page-size choices');
 assert(appJs.includes('renderPagination') && appJs.includes('page-size-select') && appJs.includes('paginateItems'), 'frontend lists should use the shared pagination component');
+assert(appJs.includes('problem-list-table') && appJs.includes('problem-col-status') && appJs.includes('problem-list-title-cell'), 'problem list should use stable table columns across pages');
 assert(appJs.includes("renderPagination('/problems'") && appJs.includes("renderPagination('/prelim'") && appJs.includes("renderPagination('/prelim/mock'") && appJs.includes("renderPagination('/admin/problems'"), 'primary problem/prelim/mock/admin lists should render pagination controls');
 assert(appJs.includes("paperPageSize") && appJs.includes("itemPageSize") && !appJs.includes("prelim/questions?all=1"), 'prelim admin should paginate papers/items separately and avoid loading all subquestions');
 const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public', 'index.html'), 'utf8');
@@ -256,6 +258,7 @@ assert(appJs.includes('name="specialJudge"') && appJs.includes('renderCheckerPan
 
 const prelimRoutes = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'prelim.js'), 'utf8');
 assert(prelimRoutes.includes('truthPaperTitle') && prelimRoutes.includes('displayMockExamTitle') && prelimRoutes.includes('真题卷'), 'prelim true-paper flow should name papers as 真题卷 and normalize old mock titles');
+assert(prelimRoutes.includes('CAST(p.year AS TEXT) LIKE ?') && prelimRoutes.includes('kq.options_json LIKE ?') && prelimRoutes.includes('kt.name_zh LIKE ?'), 'prelim keyword search should include year, options, and canonical tags');
 for (const route of ["router.get('/items'", "router.get('/items/:id'", "router.post('/questions/:id/check'", "router.post('/import-md'", "router.get('/facets'", "router.get('/mock/papers'", "router.post('/mock/start'", "router.post('/mock/exams/:id/submit'", 'scoreTotalForMock', 'clampScoreToTotal']) {
   assert(prelimRoutes.includes(route), `missing prelim backend route ${route}`);
 }
@@ -281,11 +284,13 @@ assert(adminRoutesJs.includes("router.get('/ai-settings'") && adminRoutesJs.incl
 const aiPromptsJs = fs.readFileSync(path.join(__dirname, '..', 'backend', 'ai-prompts.js'), 'utf8');
 assert(settingsJs.includes("'ai.provider': 'xfyun'") && settingsJs.includes("'ai.default_model': 'xopqwen36v35b'") && settingsJs.includes("'ai.context_mode': 'recent'") && settingsJs.includes("'ai.context_recent_messages': '6'"), 'AI settings should default to Xunfei Xingchen Qwen3.6 with recent context');
 assert(settingsJs.includes("'ai.review_enabled': '1'") && settingsJs.includes("'ai.review_prompt': AI_REVIEW_PROMPT") && settingsJs.includes('reviewPrompt'), 'AI settings should persist second-pass review switch and prompt');
+assert(settingsJs.includes("'ai.max_history_mb_per_user': '5'") && settingsJs.includes('historyLimitBytesPerUser'), 'AI settings should default to a per-user history storage quota');
 assert(!settingsJs.includes("'ai.block_full_code'") && !settingsJs.includes("'ai.direct_refusal_enabled'") && !settingsJs.includes("'ai.max_code_block_lines'"), 'AI settings should not keep retired regex/local-code guard defaults');
 assert(dbJsFinal.includes("key = 'ai.default_model'") && dbJsFinal.includes("value = 'xsparkx2flash'") && dbJsFinal.includes("xopqwen36v35b"), 'database migration should upgrade the old Xunfei default model to Qwen3.6');
 assert(settingsJs.includes('AI_PROVIDER_DEFAULTS') && settingsJs.includes('XFYUN_API_KEY') && settingsJs.includes('DEEPSEEK_API_KEY'), 'AI settings should support Xunfei first and keep DeepSeek switchback');
 assert(aiRoutesJs.includes('streamOpenAiCompatible') && aiRoutesJs.includes('/chat/completions') && aiRoutesJs.includes('stream: true'), 'AI route should call OpenAI-compatible chat completions with streaming enabled');
 assert(aiRoutesJs.includes('collectOpenAiStream') && aiRoutesJs.includes('reviewMessages') && aiRoutesJs.includes('settings.reviewEnabled'), 'AI route should perform optional streaming second-pass review through the upstream model');
+assert(aiRoutesJs.includes('userHistoryUsedBytes') && aiRoutesJs.includes("router.post('/sessions/batch-delete'") && aiRoutesJs.includes('ensureHistoryQuota'), 'AI routes should enforce user history quota and batch-delete only owned sessions');
 assert(aiRoutesJs.includes('【首次回复】') && aiRoutesJs.includes('messages: reviewMessages(settings, assistantContent)'), 'AI second-pass review should use review prompt plus first reply without context history');
 assert(aiRoutesJs.includes("settings.provider === 'xfyun'") && aiRoutesJs.includes('enable_thinking = false'), 'Xunfei streaming should disable reasoning output so the UI receives assistant content directly');
 assert(aiRoutesJs.includes("router.get('/sessions'") && aiRoutesJs.includes("router.post('/sessions'") && aiRoutesJs.includes("router.patch('/sessions/:id'") && aiRoutesJs.includes("router.delete('/sessions/:id'"), 'AI route should support session CRUD');
@@ -393,6 +398,8 @@ assert(appJs.includes('tag-selected-box') && appJs.includes('updateSelectedTagBo
 assert(!appJs.includes(' · ${esc(meta)}'), 'problem tag selector should not show level suffixes such as · topic');
 const styleCss = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'public', 'style.css'), 'utf8');
 assert(styleCss.includes('.site-footer') && styleCss.includes('flex-shrink: 0') && styleCss.includes('.site-footer a:hover'), 'stylesheet should keep the ICP filing footer visible and clickable');
+assert(styleCss.includes('scrollbar-gutter: stable') && styleCss.includes('.main-nav button { height: 100%; min-width: 86px') && styleCss.includes('.main-nav button { min-width: max-content; }'), 'fixed header navigation should not jump when routes change scrollbar state or active label weight');
+assert(styleCss.includes('.ai-session-tools {\n  display: none;') && styleCss.includes('.ai-sidebar.ai-multiselect-mode .ai-session-tools { display: flex;') && styleCss.includes('.ai-sidebar.ai-multiselect-mode .ai-session-check-wrap { display: grid;'), 'AI multi-select controls should stay hidden until the user enters multi-select mode');
 assert(styleCss.includes('.container.ai-container') && styleCss.includes('position: sticky') && styleCss.includes('height: calc(100vh - 108px)') && styleCss.includes('.ai-welcome-card'), 'AI page CSS should widen 小轻 and keep history/composer independent from message scrolling');
 assert(styleCss.includes('.ai-loading') && styleCss.includes('@keyframes ai-spin'), 'AI page CSS should show loading stages with a spinner');
 assert(styleCss.includes('border-radius: 28px') && styleCss.includes('box-shadow: 0 18px 42px') && styleCss.includes('backdrop-filter: blur(12px)'), 'AI composer should render as a rounded floating bottom bar');

@@ -6,6 +6,7 @@ const aiNav = document.getElementById('aiNav');
 const userBox = document.getElementById('userBox');
 let submissionPollTimer = null;
 let loginFailureCount = 0;
+let aiMultiSelectMode = false;
 
 async function api(url, options = {}) {
   const res = await fetch(url, {
@@ -434,6 +435,13 @@ function formatMemoryKb(value) {
   if (kb >= 1024) return `${Math.round(kb * 10 / 1024) / 10} MB`;
   return `${Math.ceil(kb)} KB`;
 }
+function formatBytes(value) {
+  const bytes = Math.max(0, Number(value) || 0);
+  if (bytes >= 1024 * 1024 * 1024) return `${Math.round(bytes * 10 / (1024 * 1024 * 1024)) / 10} GB`;
+  if (bytes >= 1024 * 1024) return `${Math.round(bytes * 10 / (1024 * 1024)) / 10} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes * 10 / 1024) / 10} KB`;
+  return `${bytes} B`;
+}
 function shouldShowPrelimGroupStem(item) {
   return item && item.section !== 'single_choice' && String(item.stem || '').trim();
 }
@@ -861,14 +869,28 @@ function aiMessageHtml(message, id = '') {
 
 function aiSessionButton(session, selectedId) {
   const active = Number(session.id) === Number(selectedId) ? ' active' : '';
-  return `<button type="button" class="ai-session-item${active}" data-route="/ai?session=${esc(session.id)}">
-    <span>${aiSessionTitle(session)}</span>
-    <small>${esc(formatUtc8Time(session.updatedAt))} · ${esc(session.messageCount || 0)} 条</small>
-  </button>`;
+  return `<div class="ai-session-row${active}" data-session-id="${esc(session.id)}">
+    <label class="ai-session-check-wrap" title="选择会话"><input type="checkbox" class="ai-session-check" value="${esc(session.id)}" aria-label="选择会话 ${aiSessionTitle(session)}" /></label>
+    <button type="button" class="ai-session-item${active}" data-route="/ai?session=${esc(session.id)}">
+      <span>${aiSessionTitle(session)}</span>
+      <small>${esc(formatUtc8Time(session.updatedAt))} · ${esc(session.messageCount || 0)} 条</small>
+    </button>
+  </div>`;
 }
 
 function aiWelcomeHtml() {
   return '<div class="ai-welcome"><div class="ai-welcome-card"><h2>你好，我是小轻👋</h2><p>可以问我编程知识、调试思路，也可以把你的代码发给我一起看。</p></div></div>';
+}
+
+function aiStorageMeter(config = {}) {
+  const used = Number(config.historyUsedBytes || 0);
+  const limit = Number(config.historyLimitBytes || 0);
+  const percent = limit > 0 ? Math.min(100, Math.max(0, used / limit * 100)) : 0;
+  return `<div class="ai-storage-meter">
+    <div class="ai-storage-head"><span>历史空间</span><b>${esc(formatBytes(used))} / ${esc(formatBytes(limit))}</b></div>
+    <div class="ai-storage-track" aria-label="小轻历史空间使用量"><i style="width:${esc(percent.toFixed(1))}%"></i></div>
+    <p class="muted small">删除旧会话后会释放小轻历史额度。</p>
+  </div>`;
 }
 
 function aiLoadingHtml(text) {
@@ -903,6 +925,67 @@ async function deleteAiSessionAction(id) {
   nav('/ai');
 }
 window.deleteAiSession = (id) => runUiAction(() => deleteAiSessionAction(id));
+
+function selectedAiSessionIds() {
+  return qsa('.ai-session-check:checked').map((item) => Number(item.value)).filter((id) => Number.isInteger(id) && id > 0);
+}
+
+function updateAiSessionBulkState() {
+  const boxes = qsa('.ai-session-check');
+  const checked = boxes.filter((item) => item.checked).length;
+  const checkAll = qs('#aiSessionCheckAll');
+  const deleteBtn = qs('#deleteSelectedAiSessions');
+  const count = qs('#aiSessionSelectedCount');
+  if (checkAll) {
+    checkAll.checked = boxes.length > 0 && checked === boxes.length;
+    checkAll.indeterminate = checked > 0 && checked < boxes.length;
+  }
+  if (count) count.textContent = checked ? `已选择 ${checked} 个` : '选择会话';
+  if (deleteBtn) {
+    deleteBtn.disabled = checked === 0;
+    deleteBtn.textContent = checked ? `删除 ${checked} 个` : '删除选中';
+  }
+}
+
+async function deleteSelectedAiSessionsAction(activeSessionId = 0) {
+  const ids = selectedAiSessionIds();
+  if (!ids.length) return alert('请先选择要删除的会话。');
+  if (!confirm(`确认删除选中的 ${ids.length} 个会话？历史消息会一起删除。`)) return null;
+  await api('/api/ai/sessions/batch-delete', { method: 'POST', body: { ids } });
+  aiMultiSelectMode = false;
+  if (ids.includes(Number(activeSessionId))) nav('/ai');
+  else await renderAiPage();
+  return null;
+}
+
+function setAiMultiSelectMode(on) {
+  aiMultiSelectMode = Boolean(on);
+  const sidebar = qs('.ai-sidebar');
+  if (!sidebar) return;
+  sidebar.classList.toggle('ai-multiselect-mode', aiMultiSelectMode);
+  const btn = qs('#aiMultiSelectBtn', sidebar);
+  if (btn) {
+    btn.textContent = aiMultiSelectMode ? '退出多选' : '多选';
+    btn.setAttribute('aria-expanded', aiMultiSelectMode ? 'true' : 'false');
+  }
+  if (!aiMultiSelectMode) qsa('.ai-session-check', sidebar).forEach((item) => { item.checked = false; });
+  updateAiSessionBulkState();
+}
+
+function bindAiSessionBulkActions(activeSessionId = 0) {
+  const sidebar = qs('.ai-sidebar');
+  if (!sidebar || sidebar.dataset.bulkBound === '1') return;
+  sidebar.dataset.bulkBound = '1';
+  qs('#aiMultiSelectBtn', sidebar)?.addEventListener('click', () => setAiMultiSelectMode(!aiMultiSelectMode));
+  qs('#cancelAiMultiSelect', sidebar)?.addEventListener('click', () => setAiMultiSelectMode(false));
+  sidebar.addEventListener('change', (event) => {
+    const checkAll = event.target.closest('#aiSessionCheckAll');
+    if (checkAll) qsa('.ai-session-check', sidebar).forEach((item) => { item.checked = checkAll.checked; });
+    if (event.target.closest('.ai-session-check') || checkAll) updateAiSessionBulkState();
+  });
+  qs('#deleteSelectedAiSessions', sidebar)?.addEventListener('click', () => runUiAction(() => deleteSelectedAiSessionsAction(activeSessionId)));
+  setAiMultiSelectMode(aiMultiSelectMode);
+}
 
 function appendAiMessage(message, id = '') {
   const list = qs('#aiMessages');
@@ -996,6 +1079,7 @@ async function renderAiPage() {
   setImmersive(false);
   app.classList.add('ai-container');
   if (!currentUser) { nav('/login'); return; }
+  aiMultiSelectMode = false;
   const params = new URLSearchParams(location.search);
   const [config, list] = await Promise.all([api('/api/ai/config'), api('/api/ai/sessions')]);
   let selectedId = Number(params.get('session') || 0);
@@ -1012,9 +1096,19 @@ async function renderAiPage() {
     <aside class="ai-sidebar card">
       <div class="ai-sidebar-head">
         <h2>会话记录</h2>
-        <button type="button" class="primary" onclick="createAiSession()">新会话</button>
+        <div class="ai-sidebar-actions">
+          <button type="button" id="aiMultiSelectBtn" aria-expanded="false">多选</button>
+          <button type="button" class="primary" onclick="createAiSession()">新会话</button>
+        </div>
+      </div>
+      <div class="ai-session-tools">
+        <span id="aiSessionSelectedCount" class="ai-session-selected-count">选择会话</span>
+        <label class="checkbox-line"><input type="checkbox" id="aiSessionCheckAll" /> 全选</label>
+        <button type="button" id="cancelAiMultiSelect">取消</button>
+        <button type="button" id="deleteSelectedAiSessions" class="danger" disabled>删除选中</button>
       </div>
       <div class="ai-session-list">${(list.sessions || []).map((item) => aiSessionButton(item, selectedId)).join('') || '<p class="muted">暂无会话，点击新建开始。</p>'}</div>
+      ${aiStorageMeter(config)}
     </aside>
     <section class="ai-chat card">
       ${session ? `<div class="ai-chat-head">
@@ -1029,6 +1123,7 @@ async function renderAiPage() {
   </div>`;
   const messagesBox = qs('#aiMessages');
   if (messagesBox) messagesBox.scrollTop = messagesBox.scrollHeight;
+  bindAiSessionBulkActions(selectedId);
   const form = qs('#aiMessageForm');
   if (form) {
     const textarea = qs('[name="content"]', form);
@@ -1047,11 +1142,11 @@ async function renderAiPage() {
 
 function publicProblemRow(p) {
   return `<tr>
-    <td>${problemSubmitStatus(p)}</td>
-    <td>${routeAnchor(`/problem/${problemUrl(p.id)}`, `${p.id}. ${p.title}`, 'problem-title-link')}</td>
-    <td>${tagChips(p.tags || [])}</td>
-    <td>${difficultyBadge(p.difficulty)}</td>
-    <td>${acceptanceText(p)}</td>
+    <td class="problem-status-cell">${problemSubmitStatus(p)}</td>
+    <td class="problem-list-title-cell">${routeAnchor(`/problem/${problemUrl(p.id)}`, `${p.id}. ${p.title}`, 'problem-title-link')}</td>
+    <td class="problem-list-tags-cell">${tagChips(p.tags || [])}</td>
+    <td class="problem-difficulty-cell">${difficultyBadge(p.difficulty)}</td>
+    <td class="problem-acceptance-cell">${acceptanceText(p)}</td>
   </tr>`;
 }
 
@@ -1059,10 +1154,10 @@ function manageProblemRow(p) {
   return `<tr>
     <td><input type="checkbox" class="problem-check" value="${esc(p.id)}"></td>
     <td class="problem-state-cell">${problemVisibilityBadge(p)}<div class="muted small nowrap problem-case-count">数据 ${p.caseCount || 0} 组</div></td>
-    <td>${routeAnchor(`/problem/${problemUrl(p.id)}`, `${p.id}. ${p.title}`, 'problem-title-link')}</td>
-    <td>${tagChips(p.tags || [])}</td>
-    <td>${difficultyBadge(p.difficulty)}</td>
-    <td>${acceptanceText(p)}<div class="muted small">${p.acCount || 0}/${p.submitCount || 0}</div></td>
+    <td class="problem-list-title-cell">${routeAnchor(`/problem/${problemUrl(p.id)}`, `${p.id}. ${p.title}`, 'problem-title-link')}</td>
+    <td class="problem-list-tags-cell">${tagChips(p.tags || [])}</td>
+    <td class="problem-difficulty-cell">${difficultyBadge(p.difficulty)}</td>
+    <td class="problem-acceptance-cell">${acceptanceText(p)}<div class="muted small">${p.acCount || 0}/${p.submitCount || 0}</div></td>
     <td class="table-actions-cell manage-actions-cell">
       <div class="table-action-row" aria-label="题目操作">
         ${routeLink(`/admin/problem/${problemUrl(p.id)}/edit`, '编辑', 'btn table-link-btn')}
@@ -1096,8 +1191,9 @@ async function renderProblems() {
         <div class="filter-actions"><button class="primary">筛选</button><button type="button" class="reset-btn" onclick="nav('/problems')">重置</button></div>
       </form>
     </div>
-    <div class="card table-card problemset-table">
+    <div class="card table-card problemset-table problem-list-table">
       <table>
+        <colgroup><col class="problem-col-status"><col class="problem-col-title"><col class="problem-col-tags"><col class="problem-col-difficulty"><col class="problem-col-acceptance"></colgroup>
         <thead><tr><th>状态</th><th>标题</th><th>知识点</th><th>难度</th><th>通过率</th></tr></thead>
         <tbody>${pageData.items.length ? pageData.items.map(publicProblemRow).join('') : `<tr><td colspan="5" class="muted">暂无题目</td></tr>`}</tbody>
       </table>
@@ -1881,6 +1977,7 @@ async function renderAdminAiSettings() {
       <label>每用户每日最大请求数<input name="maxRequestsPerUserPerDay" type="number" min="1" max="1000" value="${esc(s.maxRequestsPerUserPerDay || 50)}" /></label>
       <label>最大输入字符数<input name="maxInputChars" type="number" min="100" max="100000" value="${esc(s.maxInputChars || 12000)}" /></label>
       <label>最大输出 tokens<input name="maxOutputTokens" type="number" min="128" max="32000" value="${esc(s.maxOutputTokens || 2048)}" /></label>
+      <label>每用户历史上限 MB<input name="maxHistoryMbPerUser" type="number" min="1" max="1024" value="${esc(s.maxHistoryMbPerUser || 5)}" /></label>
       <label>上下文模式<select name="contextMode"><option value="none" ${s.contextMode === 'none' ? 'selected' : ''}>none：只发送当前消息</option><option value="recent" ${s.contextMode !== 'none' ? 'selected' : ''}>recent：发送最近消息</option></select></label>
       <label>最近上下文消息数<input name="contextRecentMessages" type="number" min="0" max="50" value="${esc(s.contextRecentMessages ?? 6)}" /></label>
       <label class="checkbox-line"><input type="checkbox" name="reviewEnabled" ${s.reviewEnabled ? 'checked' : ''} /> 启用二次审查</label>
@@ -1905,6 +2002,7 @@ async function renderAdminAiSettings() {
           maxRequestsPerUserPerDay: Number(f.maxRequestsPerUserPerDay),
           maxInputChars: Number(f.maxInputChars),
           maxOutputTokens: Number(f.maxOutputTokens),
+          maxHistoryMbPerUser: Number(f.maxHistoryMbPerUser),
           contextMode: f.contextMode,
           contextRecentMessages: Number(f.contextRecentMessages),
           reviewEnabled: Boolean(event.target.reviewEnabled.checked),
@@ -1941,7 +2039,7 @@ async function renderProblemManage() {
     <div class="filter-actions"><button class="primary">筛选</button><button type="button" class="reset-btn" onclick="nav('/admin/problems')">重置</button></div>
   </form></div>
   <div class="card batch-bar"><label class="checkbox-line"><input type="checkbox" id="checkAllProblems" /> 全选</label><button onclick="batchProblemManage('publish')">批量公开</button><button onclick="batchProblemManage('hide')">批量隐藏</button><button class="danger" onclick="batchProblemManage('delete')">批量删除</button></div>
-  <div class="card table-card problemset-table manage-problem-table"><table><thead><tr><th></th><th>状态</th><th>标题</th><th>知识点</th><th>难度</th><th>通过率</th><th>操作</th></tr></thead><tbody>${pageData.items.length ? pageData.items.map(manageProblemRow).join('') : '<tr><td colspan="7" class="muted">暂无题目</td></tr>'}</tbody></table>${renderPagination('/admin/problems', params, pageData, '道题')}</div>`;
+  <div class="card table-card problemset-table manage-problem-table"><table><colgroup><col class="manage-col-check"><col class="manage-col-state"><col class="manage-col-title"><col class="manage-col-tags"><col class="manage-col-difficulty"><col class="manage-col-acceptance"><col class="manage-col-actions"></colgroup><thead><tr><th></th><th>状态</th><th>标题</th><th>知识点</th><th>难度</th><th>通过率</th><th>操作</th></tr></thead><tbody>${pageData.items.length ? pageData.items.map(manageProblemRow).join('') : '<tr><td colspan="7" class="muted">暂无题目</td></tr>'}</tbody></table>${renderPagination('/admin/problems', params, pageData, '道题')}</div>`;
   qs('#problemManageFilter').onsubmit = (e) => {
     e.preventDefault();
     const f = formData(e.target);

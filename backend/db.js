@@ -235,14 +235,42 @@ function migrate() {
       role TEXT NOT NULL,
       content TEXT NOT NULL DEFAULT '',
       model TEXT NOT NULL DEFAULT '',
+      provider TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'complete',
+      is_fallback INTEGER NOT NULL DEFAULT 0,
+      finish_reason TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(session_id) REFERENCES ai_sessions(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS ai_usage_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      session_id INTEGER,
+      phase TEXT NOT NULL DEFAULT 'generation',
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'success',
+      http_status INTEGER NOT NULL DEFAULT 0,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_hit_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_miss_tokens INTEGER NOT NULL DEFAULT 0,
+      estimated_cost_cny REAL NOT NULL DEFAULT 0,
+      fallback_used INTEGER NOT NULL DEFAULT 0,
+      error_code TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(session_id) REFERENCES ai_sessions(id) ON DELETE SET NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_ai_sessions_user ON ai_sessions(user_id, updated_at);
     CREATE INDEX IF NOT EXISTS idx_ai_messages_session ON ai_messages(session_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_ai_messages_user_day ON ai_messages(user_id, role, created_at);
+    CREATE INDEX IF NOT EXISTS idx_ai_usage_user_day ON ai_usage_events(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_ai_usage_provider_day ON ai_usage_events(provider, created_at);
   `);
 
   function tableColumns(table) {
@@ -287,7 +315,28 @@ function migrate() {
 
   ensureColumn('prelim_groups', 'section_title', "TEXT NOT NULL DEFAULT ''");
 
+  ensureColumn('ai_messages', 'provider', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('ai_messages', 'status', "TEXT NOT NULL DEFAULT 'complete'");
+  ensureColumn('ai_messages', 'is_fallback', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('ai_messages', 'finish_reason', "TEXT NOT NULL DEFAULT ''");
+
   db.prepare("UPDATE app_settings SET value = 'xopqwen36v35b', updated_at = CURRENT_TIMESTAMP WHERE key = 'ai.default_model' AND value = 'xsparkx2flash'").run();
+
+  // Preserve custom provider settings created before per-provider configuration existed.
+  db.exec(`
+    INSERT OR IGNORE INTO app_settings(key, value)
+      SELECT 'ai.xfyun_base_url', value FROM app_settings
+      WHERE key = 'ai.base_url' AND COALESCE((SELECT value FROM app_settings WHERE key = 'ai.provider'), 'xfyun') = 'xfyun';
+    INSERT OR IGNORE INTO app_settings(key, value)
+      SELECT 'ai.xfyun_model', value FROM app_settings
+      WHERE key = 'ai.default_model' AND COALESCE((SELECT value FROM app_settings WHERE key = 'ai.provider'), 'xfyun') = 'xfyun';
+    INSERT OR IGNORE INTO app_settings(key, value)
+      SELECT 'ai.deepseek_base_url', value FROM app_settings
+      WHERE key = 'ai.base_url' AND (SELECT value FROM app_settings WHERE key = 'ai.provider') = 'deepseek';
+    INSERT OR IGNORE INTO app_settings(key, value)
+      SELECT 'ai.deepseek_model', value FROM app_settings
+      WHERE key = 'ai.default_model' AND (SELECT value FROM app_settings WHERE key = 'ai.provider') = 'deepseek';
+  `);
 
 }
 

@@ -2,11 +2,17 @@ const express = require('express');
 const { db } = require('../db');
 const { requireLogin } = require('../auth');
 const { getAiSettings } = require('../settings');
+const { AI_IDENTITY_PROMPT } = require('../ai-prompts');
 const {
-  AI_IDENTITY_PROMPT,
-} = require('../ai-prompts');
+  AiProviderError,
+  currentApiKey,
+  estimatedDeepSeekCost,
+  normalizeUsage,
+  streamCompletion,
+} = require('../ai-provider');
 
 const router = express.Router();
+const INTERRUPTED_REPLY = '本次回答生成中断，请稍后再试。';
 
 function sessionFromRow(row) {
   if (!row) return null;
@@ -27,6 +33,10 @@ function messageFromRow(row) {
     role: row.role,
     content: row.content,
     model: row.model || '',
+    provider: row.provider || '',
+    status: row.status || 'complete',
+    isFallback: Boolean(row.is_fallback),
+    finishReason: row.finish_reason || '',
     createdAt: row.created_at,
   };
 }
@@ -83,6 +93,7 @@ function cleanSessionIds(value) {
 }
 
 function sse(res, event, data) {
+  if (res.writableEnded || res.destroyed) return;
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
@@ -91,10 +102,12 @@ function sseStage(res, stage, label) {
   sse(res, 'stage', { stage, label });
 }
 
-function responseMessages(settings, sessionId, userMessageId, content) {
+function responseMessages(settings, sessionId, userMessageId, content, userRole) {
   const identityPrompt = settings.systemPrompt.includes('小轻') ? '' : `${AI_IDENTITY_PROMPT}\n\n`;
-  const prompt = `${identityPrompt}${settings.systemPrompt}`;
-  const messages = [{ role: 'system', content: prompt }];
+  const rolePrompt = userRole === 'admin'
+    ? '\n\n【当前用户角色】管理员。可以根据管理员的明确要求提供完整代码，但仍需遵守安全、隐私和系统保护规则。'
+    : '\n\n【当前用户角色】普通学生。严格执行教学式帮助和非代写边界。';
+  const messages = [{ role: 'system', content: `${identityPrompt}${settings.systemPrompt}${rolePrompt}` }];
   if (settings.contextMode === 'recent' && settings.contextRecentMessages > 0) {
     const recent = db.prepare(`SELECT role, content FROM ai_messages
       WHERE session_id = ? AND id <> ? AND role IN ('user', 'assistant')
@@ -105,72 +118,32 @@ function responseMessages(settings, sessionId, userMessageId, content) {
   return messages;
 }
 
-function reviewMessages(settings, firstReply) {
-  return [{
-    role: 'user',
-    content: `${settings.reviewPrompt}\n\n【首次回复】\n${String(firstReply || '').trim()}`,
-  }];
-}
-
-function currentApiKey(settings) {
-  return process.env[settings.apiKeyEnv] || '';
-}
-
-async function streamOpenAiCompatible({ settings, messages, signal }) {
-  const body = {
-    model: settings.defaultModel,
-    messages,
-    max_tokens: settings.maxOutputTokens,
-    stream: true,
-  };
-  if (settings.provider === 'xfyun') {
-    body.enable_thinking = false;
-  }
-  return fetch(`${settings.baseUrl}/chat/completions`, {
-    method: 'POST',
-    signal,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${currentApiKey(settings)}`,
+function reviewMessages(settings, userRole, originalContent, generationMessages, firstReply) {
+  const transcript = generationMessages
+    .filter((message) => message.role !== 'system')
+    .map((message) => `${message.role === 'assistant' ? '小轻' : '用户'}：${message.content}`)
+    .join('\n\n');
+  return [
+    { role: 'system', content: settings.reviewPrompt },
+    {
+      role: 'user',
+      content: `【当前用户角色】\n${userRole === 'admin' ? '管理员' : '普通学生'}\n\n【当前原始问题】\n${originalContent}\n\n【最近对话，仅供理解】\n${transcript}\n\n【待审查草稿】\n${String(firstReply || '').trim()}\n\n请只输出最终给用户看的回复。`,
     },
-    body: JSON.stringify(body),
-  });
+  ];
 }
 
-async function collectOpenAiStream(upstream, onDelta, shouldStop = () => false) {
-  const decoder = new TextDecoder();
-  let lineBuffer = '';
-  let content = '';
-  let done = false;
+function providerConfigured(provider) {
+  return Boolean(currentApiKey(provider));
+}
 
-  const handleLine = (line) => {
-    const trimmed = line.trimEnd();
-    if (!trimmed.startsWith('data:')) return;
-    const data = trimmed.slice(5).trim();
-    if (!data) return;
-    if (data === '[DONE]') {
-      done = true;
-      return;
-    }
-    try {
-      const json = JSON.parse(data);
-      const delta = json.choices?.[0]?.delta?.content || '';
-      if (delta && !shouldStop()) {
-        content += delta;
-        onDelta?.(delta);
-      }
-    } catch (_) {}
-  };
+function canUseFallback(settings) {
+  return settings.provider === 'deepseek' && settings.fallbackToXfyun && providerConfigured('xfyun');
+}
 
-  for await (const chunk of upstream.body) {
-    lineBuffer += decoder.decode(chunk, { stream: true });
-    const lines = lineBuffer.split(/\r?\n/);
-    lineBuffer = lines.pop() || '';
-    lines.forEach(handleLine);
-    if (done || shouldStop()) break;
-  }
-  if (lineBuffer && !shouldStop()) handleLine(lineBuffer);
-  return content;
+function canStartConversation(settings) {
+  const generationAvailable = providerConfigured(settings.provider) || canUseFallback(settings);
+  const reviewAvailable = !settings.reviewEnabled || providerConfigured(settings.reviewResolvedProvider);
+  return generationAvailable && reviewAvailable;
 }
 
 function startSse(res) {
@@ -182,70 +155,230 @@ function startSse(res) {
   res.flushHeaders?.();
 }
 
-function saveAssistantMessage(sessionId, userId, content, model) {
-  const info = db.prepare(`INSERT INTO ai_messages (session_id, user_id, role, content, model)
-    VALUES (?, ?, 'assistant', ?, ?)`).run(sessionId, userId, content, model);
+function completionMessageStatus(finishReason) {
+  if (finishReason === 'length') return 'truncated';
+  if (['content_filter', 'insufficient_system_resource'].includes(finishReason)) return 'interrupted';
+  return 'complete';
+}
+
+function saveAssistantMessage(sessionId, userId, content, result = {}, status = 'complete') {
+  const info = db.prepare(`INSERT INTO ai_messages
+      (session_id, user_id, role, content, model, provider, status, is_fallback, finish_reason)
+    VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?)`)
+    .run(sessionId, userId, content, result.model || '', result.provider || '', status, result.fallbackUsed ? 1 : 0, result.finishReason || '');
   db.prepare('UPDATE ai_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?').run(sessionId, userId);
   return info.lastInsertRowid;
 }
 
-router.get('/config', requireLogin, (_req, res) => {
+function recordUsageEvent({ userId, sessionId, phase, provider, model, status, httpStatus = 0, usage = {}, estimatedCostCny = 0, fallbackUsed = false, errorCode = '' }) {
+  const normalized = normalizeUsage(usage);
+  db.prepare(`INSERT INTO ai_usage_events
+      (user_id, session_id, phase, provider, model, status, http_status,
+       input_tokens, output_tokens, reasoning_tokens, cache_hit_tokens, cache_miss_tokens,
+       estimated_cost_cny, fallback_used, error_code)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(userId, sessionId, phase, provider || '', model || '', status, Number(httpStatus || 0),
+      normalized.inputTokens, normalized.outputTokens, normalized.reasoningTokens,
+      normalized.cacheHitTokens, normalized.cacheMissTokens, Number(estimatedCostCny || 0),
+      fallbackUsed ? 1 : 0, String(errorCode || '').slice(0, 80));
+}
+
+function usageFromError(err) {
+  return normalizeUsage(err?.partial?.usage || {});
+}
+
+async function runProviderAttempt({ settings, userId, sessionId, phase, provider, model, messages, signal, onDelta, fallbackUsed = false }) {
+  try {
+    const result = await streamCompletion({ settings, provider, model, messages, userId, signal, onDelta });
+    if (!result.content.trim()) {
+      throw new AiProviderError('上游模型返回了空内容', {
+        provider: result.provider,
+        model: result.model,
+        code: 'empty_response',
+        canFallback: result.provider === 'deepseek',
+        partial: result,
+      });
+    }
+    if (result.finishReason === 'insufficient_system_resource') {
+      throw new AiProviderError('上游模型推理资源不足', {
+        provider: result.provider,
+        model: result.model,
+        code: 'insufficient_system_resource',
+        canFallback: result.provider === 'deepseek',
+        partial: result,
+      });
+    }
+    if (result.finishReason === 'stream_interrupted') {
+      throw new AiProviderError('上游模型流式输出中断', {
+        provider: result.provider,
+        model: result.model,
+        code: 'stream_interrupted',
+        canFallback: result.provider === 'deepseek',
+        partial: result,
+      });
+    }
+    recordUsageEvent({
+      userId, sessionId, phase, provider: result.provider, model: result.model,
+      status: 'success', usage: result.usage, estimatedCostCny: result.estimatedCostCny,
+      fallbackUsed,
+    });
+    return { ...result, fallbackUsed };
+  } catch (err) {
+    const providerName = err.provider || provider;
+    const modelName = err.model || model || settings.providers?.[providerName]?.model || '';
+    const partialUsage = usageFromError(err);
+    recordUsageEvent({
+      userId, sessionId, phase, provider: providerName, model: modelName,
+      status: err.code === 'client_aborted' ? 'interrupted' : 'error',
+      httpStatus: err.httpStatus, usage: partialUsage,
+      estimatedCostCny: providerName === 'deepseek' ? estimatedDeepSeekCost(modelName, partialUsage) : 0,
+      fallbackUsed, errorCode: err.code || 'upstream_error',
+    });
+    throw err;
+  }
+}
+
+async function runGeneration({ settings, userId, sessionId, messages, signal, onDelta, outputHidden, onFallback }) {
+  try {
+    return await runProviderAttempt({
+      settings, userId, sessionId, phase: 'generation', provider: settings.provider,
+      model: settings.defaultModel, messages, signal, onDelta,
+    });
+  } catch (err) {
+    const partialVisible = Boolean(err.partial?.content) && !outputHidden;
+    const mayFallback = settings.provider === 'deepseek'
+      && settings.fallbackToXfyun
+      && err.canFallback
+      && providerConfigured('xfyun')
+      && !signal.aborted
+      && !partialVisible;
+    if (!mayFallback) throw err;
+    onFallback?.();
+    return runProviderAttempt({
+      settings, userId, sessionId, phase: 'generation', provider: 'xfyun',
+      model: settings.xfyunModel, messages, signal, onDelta, fallbackUsed: true,
+    });
+  }
+}
+
+function userUsageSummary(userId, days = 1) {
+  const safeDays = Math.max(1, Math.min(365, Number(days) || 1));
+  const since = `-${safeDays - 1} days`;
+  const summary = db.prepare(`SELECT
+      COUNT(*) AS upstreamCalls,
+      COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS successfulCalls,
+      COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0) AS failedCalls,
+      COALESCE(SUM(fallback_used), 0) AS fallbackCalls,
+      COALESCE(SUM(input_tokens), 0) AS inputTokens,
+      COALESCE(SUM(output_tokens), 0) AS outputTokens,
+      COALESCE(SUM(reasoning_tokens), 0) AS reasoningTokens,
+      COALESCE(SUM(cache_hit_tokens), 0) AS cacheHitTokens,
+      COALESCE(SUM(estimated_cost_cny), 0) AS estimatedCostCny
+    FROM ai_usage_events
+    WHERE user_id = ? AND datetime(created_at, '+8 hours') >= datetime('now', '+8 hours', 'start of day', ?)`)
+    .get(userId, since);
+  return {
+    ...summary,
+    upstreamCalls: Number(summary.upstreamCalls || 0),
+    successfulCalls: Number(summary.successfulCalls || 0),
+    failedCalls: Number(summary.failedCalls || 0),
+    fallbackCalls: Number(summary.fallbackCalls || 0),
+    inputTokens: Number(summary.inputTokens || 0),
+    outputTokens: Number(summary.outputTokens || 0),
+    reasoningTokens: Number(summary.reasoningTokens || 0),
+    cacheHitTokens: Number(summary.cacheHitTokens || 0),
+    estimatedCostCny: Number(summary.estimatedCostCny || 0),
+    days: safeDays,
+  };
+}
+
+function userFacingError(err) {
+  if (err?.code === 'client_aborted') return '本次回答生成中断';
+  if (err?.code === 'invalid_request') return '小轻当前配置与上游模型不兼容，请联系管理员';
+  if (['authentication_failed', 'missing_api_key', 'insufficient_balance'].includes(err?.code)) return '小轻暂时不可用，请联系管理员';
+  if (['rate_limited', 'server_error', 'timeout', 'network_error', 'stream_interrupted', 'insufficient_system_resource'].includes(err?.code)) return '小轻现在有些忙，请稍后再试';
+  return '小轻这次没有顺利完成回答，请稍后再试';
+}
+
+router.get('/config', requireLogin, (req, res) => {
   const settings = getAiSettings(db);
+  const requestsUsedToday = todayRequestCount(req.user.id);
   res.json({
     enabled: settings.enabled,
     provider: settings.provider,
     providerLabel: settings.providerLabel,
     defaultModel: settings.defaultModel,
+    deepseekThinkingEnabled: settings.deepseekThinkingEnabled,
     maxInputChars: settings.maxInputChars,
     maxOutputTokens: settings.maxOutputTokens,
     contextMode: settings.contextMode,
     contextRecentMessages: settings.contextRecentMessages,
-    hasApiKey: Boolean(currentApiKey(settings)),
+    hasApiKey: canStartConversation(settings),
+    primaryHasApiKey: providerConfigured(settings.provider),
+    fallbackAvailable: canUseFallback(settings),
+    reviewEnabled: settings.reviewEnabled,
+    reviewProviderLabel: settings.reviewProviderLabel,
+    reviewModel: settings.reviewModel,
+    maxRequestsPerUserPerDay: settings.maxRequestsPerUserPerDay,
+    requestsUsedToday,
+    requestsRemainingToday: Math.max(0, settings.maxRequestsPerUserPerDay - requestsUsedToday),
+    todayUsage: userUsageSummary(req.user.id, 1),
     maxHistoryMbPerUser: settings.maxHistoryMbPerUser,
-    ...quotaInfo(_req.user.id, settings),
+    ...quotaInfo(req.user.id, settings),
   });
 });
 
+router.get('/usage', requireLogin, (req, res) => {
+  const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+  const daily = db.prepare(`SELECT date(created_at, '+8 hours') AS date,
+      COUNT(*) AS upstreamCalls,
+      COALESCE(SUM(input_tokens), 0) AS inputTokens,
+      COALESCE(SUM(output_tokens), 0) AS outputTokens,
+      COALESCE(SUM(reasoning_tokens), 0) AS reasoningTokens,
+      COALESCE(SUM(estimated_cost_cny), 0) AS estimatedCostCny
+    FROM ai_usage_events
+    WHERE user_id = ? AND datetime(created_at, '+8 hours') >= datetime('now', '+8 hours', 'start of day', ?)
+    GROUP BY date(created_at, '+8 hours') ORDER BY date ASC`)
+    .all(req.user.id, `-${days - 1} days`);
+  res.json({ summary: userUsageSummary(req.user.id, days), daily });
+});
+
 router.get('/sessions', requireLogin, (req, res) => {
-  const sessions = db.prepare(`SELECT s.*,
-      COUNT(m.id) AS message_count
-    FROM ai_sessions s
-    LEFT JOIN ai_messages m ON m.session_id = s.id
-    WHERE s.user_id = ?
-    GROUP BY s.id
-    ORDER BY s.updated_at DESC, s.id DESC`).all(req.user.id).map(sessionFromRow);
+  const sessions = db.prepare(`SELECT s.*, COUNT(m.id) AS message_count
+    FROM ai_sessions s LEFT JOIN ai_messages m ON m.session_id = s.id
+    WHERE s.user_id = ? GROUP BY s.id ORDER BY s.updated_at DESC, s.id DESC`)
+    .all(req.user.id).map(sessionFromRow);
   res.json({ sessions });
 });
 
 router.post('/sessions', requireLogin, (req, res) => {
-  const title = cleanTitle(req.body.title);
-  const info = db.prepare('INSERT INTO ai_sessions (user_id, title, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)').run(req.user.id, title);
-  const session = ownedSession(info.lastInsertRowid, req.user.id);
-  res.status(201).json({ session: sessionFromRow(session) });
+  const info = db.prepare('INSERT INTO ai_sessions (user_id, title, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)')
+    .run(req.user.id, cleanTitle(req.body.title));
+  res.status(201).json({ session: sessionFromRow(ownedSession(info.lastInsertRowid, req.user.id)) });
 });
 
 router.get('/sessions/:id', requireLogin, (req, res) => {
   const id = Number(req.params.id);
   const session = ownedSession(id, req.user.id);
   if (!session) return res.status(404).json({ error: 'AI 会话不存在' });
-  const messages = db.prepare(`SELECT * FROM ai_messages
-    WHERE session_id = ? AND user_id = ?
-    ORDER BY id ASC`).all(id, req.user.id).map(messageFromRow);
-  res.json({ session: sessionFromRow(session), messages });
+  const messages = db.prepare(`SELECT * FROM ai_messages WHERE session_id = ? AND user_id = ? ORDER BY id ASC`)
+    .all(id, req.user.id).map(messageFromRow);
+  return res.json({ session: sessionFromRow(session), messages });
 });
 
 router.patch('/sessions/:id', requireLogin, (req, res) => {
   const id = Number(req.params.id);
   if (!ownedSession(id, req.user.id)) return res.status(404).json({ error: 'AI 会话不存在' });
-  db.prepare('UPDATE ai_sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?').run(cleanTitle(req.body.title), id, req.user.id);
-  res.json({ session: sessionFromRow(ownedSession(id, req.user.id)) });
+  db.prepare('UPDATE ai_sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?')
+    .run(cleanTitle(req.body.title), id, req.user.id);
+  return res.json({ session: sessionFromRow(ownedSession(id, req.user.id)) });
 });
 
 router.delete('/sessions/:id', requireLogin, (req, res) => {
   const id = Number(req.params.id);
   const info = db.prepare('DELETE FROM ai_sessions WHERE id = ? AND user_id = ?').run(id, req.user.id);
   if (!info.changes) return res.status(404).json({ error: 'AI 会话不存在' });
-  res.json({ ok: true, quota: quotaInfo(req.user.id, getAiSettings(db)) });
+  return res.json({ ok: true, quota: quotaInfo(req.user.id, getAiSettings(db)) });
 });
 
 router.post('/sessions/batch-delete', requireLogin, (req, res) => {
@@ -253,105 +386,116 @@ router.post('/sessions/batch-delete', requireLogin, (req, res) => {
   if (!ids.length) return res.status(400).json({ error: '请先选择要删除的会话' });
   const placeholders = ids.map(() => '?').join(',');
   const info = db.prepare(`DELETE FROM ai_sessions WHERE user_id = ? AND id IN (${placeholders})`).run(req.user.id, ...ids);
-  res.json({ ok: true, deleted: info.changes, quota: quotaInfo(req.user.id, getAiSettings(db)) });
+  return res.json({ ok: true, deleted: info.changes, quota: quotaInfo(req.user.id, getAiSettings(db)) });
 });
 
 router.post('/sessions/:id/messages', requireLogin, async (req, res) => {
   const id = Number(req.params.id);
   const settings = getAiSettings(db);
-  const session = ownedSession(id, req.user.id);
-  if (!session) return res.status(404).json({ error: 'AI 会话不存在' });
+  if (!ownedSession(id, req.user.id)) return res.status(404).json({ error: 'AI 会话不存在' });
   if (!settings.enabled) return res.status(403).json({ error: 'AI 对话功能未启用' });
 
   const content = String(req.body.content || '').trim();
   if (!content) return res.status(400).json({ error: '消息不能为空' });
   if (content.length > settings.maxInputChars) return res.status(400).json({ error: `消息过长，最多 ${settings.maxInputChars} 个字符` });
   if (todayRequestCount(req.user.id) >= settings.maxRequestsPerUserPerDay) return res.status(429).json({ error: '今日 AI 请求次数已用完' });
-  if (!currentApiKey(settings)) return res.status(503).json({ error: `服务器未配置 ${settings.apiKeyEnv}` });
+  if (!canStartConversation(settings)) {
+    const missing = settings.reviewEnabled && !providerConfigured(settings.reviewResolvedProvider)
+      ? `${settings.reviewApiKeyEnv}（审查模型）`
+      : settings.apiKeyEnv;
+    return res.status(503).json({ error: `服务器尚未正确配置 ${missing}` });
+  }
   try {
-    const reserveAssistantBytes = Math.max(8192, settings.maxOutputTokens * 8);
-    ensureHistoryQuota(req.user.id, settings, textBytes(content) + reserveAssistantBytes);
+    ensureHistoryQuota(req.user.id, settings, textBytes(content) + Math.max(8192, settings.maxOutputTokens * 8));
   } catch (err) {
     return res.status(err.status || 413).json({ error: err.message, ...(err.quota || {}) });
   }
 
-  const tx = db.transaction(() => {
-    const info = db.prepare(`INSERT INTO ai_messages (session_id, user_id, role, content, model)
-      VALUES (?, ?, 'user', ?, '')`).run(id, req.user.id, content);
+  const userMessageId = db.transaction(() => {
+    const info = db.prepare(`INSERT INTO ai_messages (session_id, user_id, role, content, model, status)
+      VALUES (?, ?, 'user', ?, '', 'complete')`).run(id, req.user.id, content);
     db.prepare('UPDATE ai_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?').run(id, req.user.id);
     return info.lastInsertRowid;
-  });
-  const userMessageId = tx();
-
-  const messages = responseMessages(settings, id, userMessageId, content);
+  })();
+  const generationMessages = responseMessages(settings, id, userMessageId, content, req.user.role);
 
   const controller = new AbortController();
   let clientClosed = false;
   res.on('close', () => {
     if (res.writableEnded) return;
     clientClosed = true;
-    controller.abort();
+    controller.abort(new Error('client disconnected'));
   });
 
   startSse(res);
   sseStage(res, 'thinking', '小轻思考中');
 
-  let upstream;
+  let visibleContent = '';
+  let finalResult = null;
   try {
-    upstream = await streamOpenAiCompatible({ settings, messages, signal: controller.signal });
-  } catch (err) {
-    if (!clientClosed) {
-      sse(res, 'error', { error: `无法连接 ${settings.providerLabel} API`, detail: String(err.message || err) });
-      res.end();
-    }
-    return null;
-  }
-  if (!upstream.ok) {
-    const text = await upstream.text().catch(() => '');
-    if (!clientClosed) {
-      sse(res, 'error', { error: `${settings.providerLabel} API 请求失败`, detail: text.slice(0, 500) });
-      res.end();
-    }
-    return null;
-  }
+    const generation = await runGeneration({
+      settings,
+      userId: req.user.id,
+      sessionId: id,
+      messages: generationMessages,
+      signal: controller.signal,
+      outputHidden: settings.reviewEnabled,
+      onFallback: () => sseStage(res, 'fallback', '正在切换备用模型'),
+      onDelta: settings.reviewEnabled ? undefined : (delta) => {
+        visibleContent += delta;
+        sse(res, 'delta', { content: delta });
+      },
+    });
 
-  try {
-    const assistantContent = await collectOpenAiStream(upstream, (delta) => {
-      if (!settings.reviewEnabled && !clientClosed) sse(res, 'delta', { content: delta });
-    }, () => clientClosed);
+    if (settings.reviewEnabled) {
+      if (controller.signal.aborted) throw new AiProviderError('用户已中断生成', { code: 'client_aborted', provider: generation.provider, model: generation.model });
+      sseStage(res, 'reviewing', '小轻正在整理回答');
+      const reviewed = await runProviderAttempt({
+        settings,
+        userId: req.user.id,
+        sessionId: id,
+        phase: 'review',
+        provider: settings.reviewResolvedProvider,
+        model: settings.reviewModel,
+        messages: reviewMessages(settings, req.user.role, content, generationMessages, generation.content),
+        signal: controller.signal,
+        onDelta: (delta) => {
+          visibleContent += delta;
+          sse(res, 'delta', { content: delta });
+        },
+      });
+      finalResult = { ...reviewed, fallbackUsed: Boolean(generation.fallbackUsed) };
+    } else {
+      finalResult = generation;
+    }
 
+    const status = completionMessageStatus(finalResult.finishReason);
+    const finalContent = visibleContent.trim() ? visibleContent : finalResult.content;
+    const messageId = saveAssistantMessage(id, req.user.id, finalContent, finalResult, status);
     if (!clientClosed) {
-      let finalContent = assistantContent;
-      let finalModel = settings.defaultModel;
-      if (settings.reviewEnabled) {
-        let reviewUpstream;
-        try {
-          reviewUpstream = await streamOpenAiCompatible({
-            settings,
-            messages: reviewMessages(settings, assistantContent),
-            signal: controller.signal,
-          });
-        } catch (err) {
-          throw new Error(`无法连接 ${settings.providerLabel} 二次审查 API：${String(err.message || err)}`);
-        }
-        if (!reviewUpstream.ok) {
-          const text = await reviewUpstream.text().catch(() => '');
-          throw new Error(`${settings.providerLabel} 二次审查请求失败：${text.slice(0, 500)}`);
-        }
-        finalContent = await collectOpenAiStream(reviewUpstream, (delta) => {
-          if (!clientClosed) sse(res, 'delta', { content: delta });
-        }, () => clientClosed);
-        if (clientClosed) return null;
-        if (!finalContent.trim()) throw new Error(`${settings.providerLabel} 二次审查返回空内容`);
-        finalModel = `${settings.defaultModel}:review`;
-      }
-      const messageId = saveAssistantMessage(id, req.user.id, finalContent, finalModel);
-      sse(res, 'done', { messageId, content: finalContent, model: finalModel });
+      sse(res, 'done', {
+        messageId,
+        content: finalContent,
+        model: finalResult.model,
+        provider: finalResult.provider,
+        providerLabel: finalResult.providerLabel,
+        fallbackUsed: Boolean(finalResult.fallbackUsed),
+        status,
+        finishReason: finalResult.finishReason,
+      });
       res.end();
     }
   } catch (err) {
+    const partial = visibleContent.trim();
+    const interruptedResult = {
+      provider: err.provider || finalResult?.provider || settings.provider,
+      model: err.model || finalResult?.model || settings.defaultModel,
+      finishReason: err.code || 'interrupted',
+      fallbackUsed: Boolean(finalResult?.fallbackUsed),
+    };
+    saveAssistantMessage(id, req.user.id, partial || INTERRUPTED_REPLY, interruptedResult, 'interrupted');
     if (!clientClosed) {
-      sse(res, 'error', { error: 'AI 流式输出中断', detail: String(err.message || err) });
+      sse(res, 'error', { error: userFacingError(err), interrupted: true, partial: Boolean(partial) });
       res.end();
     }
   }
@@ -359,3 +503,4 @@ router.post('/sessions/:id/messages', requireLogin, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.userUsageSummary = userUsageSummary;

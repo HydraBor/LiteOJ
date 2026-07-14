@@ -313,21 +313,27 @@ npm run real-smoke
 
 ## AI 对话开发
 
-AI 对话接口位于 `backend/routes/ai.js`，配置读写位于 `backend/settings.js`。
+AI 对话接口位于 `backend/routes/ai.js`，服务商协议适配位于 `backend/ai-provider.js`，配置读写位于 `backend/settings.js`。
 
 - API Key 只从服务端环境变量读取：讯飞星辰使用 `XFYUN_API_KEY`，DeepSeek 使用 `DEEPSEEK_API_KEY`；
 - 默认服务商为讯飞星辰，OpenAI 格式 base URL 为 `https://maas-coding-api.cn-huabei-1.xf-yun.com/v2`；
-- 默认模型为讯飞星辰 Qwen3.6-35B-A3B（`xopqwen36v35b`），后续可在后台切换到 DeepSeek 的 `deepseek-v4-flash`；
+- 默认模型为讯飞星辰 Qwen3.6-35B-A3B（`xopqwen36v35b`），后台可全局切换到 DeepSeek 的 `deepseek-v4-flash`；
+- 讯飞和 DeepSeek 分别保存 BASE URL 与模型配置，切换服务商不会覆盖另一方配置；
+- DeepSeek 请求显式发送 `thinking.enabled/disabled`、`reasoning_effort=high`（开启思考时）、`stream_options.include_usage=true` 和不可逆匿名化的 `user_id`；
+- DeepSeek 的 `reasoning_content` 不展示、不入库，只记录官方返回的推理 Token；
+- DeepSeek 发生认证失败、余额不足、限流、网络超时或服务端错误时，可以单向降级到讯飞；`400/422` 参数错误不会降级；
 - 会话和消息必须按当前 `user_id` 过滤；
 - `ai.context_mode=none` 时只发送 system prompt 和当前用户消息；
 - `ai.context_mode=recent` 时发送 system prompt、当前会话最近 N 条历史消息和当前用户消息；
-- 数据库只保存 `user` / `assistant` 历史消息，不增加摘要、长期记忆或向量数据库；
+- 数据库只保存 `user` / `assistant` 历史消息，不增加摘要、长期记忆、用户画像或向量数据库；
 - `ai.max_history_mb_per_user` 默认 `5`，后端按当前用户所有 AI 消息正文的 UTF-8 字节数执行配额，单删或批量删除会话会释放额度。
-- `ai.review_enabled=true` 时，首次回复只在服务端缓冲，不先展示给学生；
-- 二次审查请求只发送 `reviewPrompt + 【首次回复】`，不发送原会话上下文；
-- 二次审查结果通过 SSE `delta` 实时输出，完成后保存审查后的最终回复；
+- `ai.review_enabled=true` 时，首次回复只在服务端内存缓冲，不展示、不入库；
+- 审查请求使用独立服务商和模型，输入包含系统审查提示词、当前用户角色、原始问题、最近上下文和首次草稿；
+- 审查结果通过 SSE `delta` 实时输出，完成后只保存最终回复；审查失败时不会回退展示未经审查的草稿；
+- 客户端断开或上游流中断时，已展示的最终内容会以 `interrupted` 状态保存；隐藏草稿不会保存；
+- `ai_usage_events` 按调用记录生成/审查阶段、服务商、模型、状态、Token、缓存命中、备用接续和 DeepSeek 估算费用；
 - 当前方案不做用户输入正则预处理，也不做本地完整代码替换；完整代码改写由二次审查提示词负责；
-- 等待期间通过 SSE `stage` 事件统一展示“小轻思考中”。
+- 等待期间通过 SSE `stage` 事件展示思考、整理回复和备用模型接续状态。
 
 ## 前端开发约定
 
@@ -358,3 +364,6 @@ AI 对话接口位于 `backend/routes/ai.js`，配置读写位于 `backend/setti
 - [testlib](https://github.com/MikeMirzayanov/testlib)
 - [CMS Score types](https://cms.readthedocs.io/en/v1.5/Score%20types.html)
 - [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+- [DeepSeek 对话补全 API](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/)
+- [DeepSeek 思考模式](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode/)
+- [DeepSeek 限速与 user_id 隔离](https://api-docs.deepseek.com/zh-cn/quick_start/rate_limit/)

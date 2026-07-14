@@ -442,6 +442,14 @@ function formatBytes(value) {
   if (bytes >= 1024) return `${Math.round(bytes * 10 / 1024) / 10} KB`;
   return `${bytes} B`;
 }
+function formatCount(value) {
+  return Math.max(0, Number(value) || 0).toLocaleString('zh-CN');
+}
+function formatEstimatedCost(value) {
+  const amount = Math.max(0, Number(value) || 0);
+  if (amount > 0 && amount < 0.0001) return '< ¥0.0001';
+  return `¥${amount.toFixed(4)}`;
+}
 function shouldShowPrelimGroupStem(item) {
   return item && item.section !== 'single_choice' && String(item.stem || '').trim();
 }
@@ -857,14 +865,24 @@ function aiSessionTitle(session) {
 function aiMessageHtml(message, id = '') {
   const role = message.role === 'assistant' ? 'assistant' : 'user';
   const title = role === 'assistant' ? '小轻' : (currentUser?.username || '我');
-  const body = role === 'assistant' ? renderMarkdown(message.content || '') : renderMarkdown(message.content || '');
-  return `<article class="ai-message ai-message-${role}" ${id ? `id="${esc(id)}"` : ''}>
+  const body = renderMarkdown(message.content || '');
+  const status = message.status || 'complete';
+  const badges = role === 'assistant' ? `${message.isFallback ? '<span class="ai-message-badge fallback">备用模型</span>' : ''}${status === 'interrupted' ? '<span class="ai-message-badge interrupted">生成中断</span>' : ''}${status === 'truncated' ? '<span class="ai-message-badge truncated">达到输出上限</span>' : ''}` : '';
+  return `<article class="ai-message ai-message-${role}${status === 'interrupted' ? ' ai-message-interrupted' : ''}" ${id ? `id="${esc(id)}"` : ''}>
     <div class="ai-message-avatar">${role === 'assistant' ? '小轻' : '我'}</div>
     <div class="ai-message-main">
-      <div class="ai-message-name">${esc(title)}</div>
+      <div class="ai-message-name"><span>${esc(title)}</span><span class="ai-message-badges">${badges}</span></div>
       <div class="markdown ai-message-content">${body || '<p></p>'}</div>
     </div>
   </article>`;
+}
+
+function applyAiMessageResult(article, message = {}) {
+  if (!article) return;
+  article.classList.toggle('ai-message-interrupted', message.status === 'interrupted');
+  const badges = qs('.ai-message-badges', article);
+  if (!badges) return;
+  badges.innerHTML = `${message.fallbackUsed || message.isFallback ? '<span class="ai-message-badge fallback">备用模型</span>' : ''}${message.status === 'interrupted' ? '<span class="ai-message-badge interrupted">生成中断</span>' : ''}${message.status === 'truncated' ? '<span class="ai-message-badge truncated">达到输出上限</span>' : ''}`;
 }
 
 function aiSessionButton(session, selectedId) {
@@ -886,11 +904,30 @@ function aiStorageMeter(config = {}) {
   const used = Number(config.historyUsedBytes || 0);
   const limit = Number(config.historyLimitBytes || 0);
   const percent = limit > 0 ? Math.min(100, Math.max(0, used / limit * 100)) : 0;
-  return `<div class="ai-storage-meter">
+  const requestsUsed = Number(config.requestsUsedToday || 0);
+  const requestsLimit = Number(config.maxRequestsPerUserPerDay || 0);
+  const requestPercent = requestsLimit > 0 ? Math.min(100, requestsUsed / requestsLimit * 100) : 0;
+  const usage = config.todayUsage || {};
+  return `<div class="ai-usage-meter" id="aiUsageMeter">
+    <div class="ai-usage-section">
+      <div class="ai-storage-head"><span>今日提问</span><b>${esc(formatCount(requestsUsed))} / ${esc(formatCount(requestsLimit))}</b></div>
+      <div class="ai-storage-track" aria-label="今日小轻提问额度"><i style="width:${esc(requestPercent.toFixed(1))}%"></i></div>
+      <p class="muted small">今日模型用量 ${esc(formatCount(Number(usage.inputTokens || 0) + Number(usage.outputTokens || 0)))} tokens</p>
+    </div>
+    <div class="ai-usage-section">
     <div class="ai-storage-head"><span>历史空间</span><b>${esc(formatBytes(used))} / ${esc(formatBytes(limit))}</b></div>
     <div class="ai-storage-track" aria-label="小轻历史空间使用量"><i style="width:${esc(percent.toFixed(1))}%"></i></div>
     <p class="muted small">删除旧会话后会释放小轻历史额度。</p>
+    </div>
   </div>`;
+}
+
+async function refreshAiUsageMeter() {
+  try {
+    const config = await api('/api/ai/config');
+    const current = qs('#aiUsageMeter');
+    if (current) current.outerHTML = aiStorageMeter(config);
+  } catch (_) {}
 }
 
 function aiLoadingHtml(text) {
@@ -1024,6 +1061,9 @@ async function sendAiMessageAction(sessionId) {
   button.disabled = true;
   textarea.disabled = true;
   let assistantNode = null;
+  let assistantArticle = null;
+  let assistantContent = '';
+  let streamFinished = false;
   try {
     if (!activeSessionId) {
       const data = await api('/api/ai/sessions', { method: 'POST', body: { title: '新会话' } });
@@ -1039,10 +1079,9 @@ async function sendAiMessageAction(sessionId) {
     textarea.value = '';
     appendAiMessage({ role: 'user', content });
     const assistantId = `ai-stream-${Date.now()}`;
-    appendAiMessage({ role: 'assistant', content: '' }, assistantId);
+    assistantArticle = appendAiMessage({ role: 'assistant', content: '', status: 'complete' }, assistantId);
     assistantNode = qs(`#${cssEscape(assistantId)} .ai-message-content`);
     assistantNode.innerHTML = aiLoadingHtml('小轻思考中');
-    let assistantContent = '';
     const res = await fetch(`/api/ai/sessions/${activeSessionId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1062,11 +1101,26 @@ async function sendAiMessageAction(sessionId) {
         assistantNode.innerHTML = renderMarkdown(assistantContent);
         qs('#aiMessages').scrollTop = qs('#aiMessages').scrollHeight;
       }
+      if (event === 'done') {
+        streamFinished = true;
+        assistantContent = data.content || assistantContent;
+        assistantNode.innerHTML = renderMarkdown(assistantContent);
+        applyAiMessageResult(assistantArticle, data);
+      }
       if (event === 'error') throw new Error(data.error || 'AI 输出中断');
     });
+    if (!streamFinished && assistantContent) applyAiMessageResult(assistantArticle, { status: 'interrupted' });
+    await refreshAiUsageMeter();
   } catch (err) {
-    if (assistantNode) assistantNode.innerHTML = `<div class="error">${esc(err.message || err)}</div>`;
+    if (assistantNode && assistantContent) {
+      assistantNode.innerHTML = `${renderMarkdown(assistantContent)}<p class="ai-interrupted-note">本次回答生成中断。</p>`;
+      applyAiMessageResult(assistantArticle, { status: 'interrupted' });
+    } else if (assistantNode) {
+      assistantNode.innerHTML = `<div class="error">${esc(err.message || err)}</div>`;
+      applyAiMessageResult(assistantArticle, { status: 'interrupted' });
+    }
     else showInlineError('#aiMessageMsg', err);
+    await refreshAiUsageMeter();
   } finally {
     button.disabled = false;
     textarea.disabled = false;
@@ -1091,7 +1145,14 @@ async function renderAiPage() {
     session = detail.session;
     messages = detail.messages || [];
   }
-  const disabledReason = !config.enabled ? '你好小轻暂未启用。' : !config.hasApiKey ? `服务器尚未配置 ${config.providerLabel || 'AI'} API Key。` : '';
+  const disabledReason = !config.enabled ? '你好小轻暂未启用。' : !config.hasApiKey ? '服务器尚未完整配置主模型或审查模型。' : '';
+  const providerNotes = [
+    `${config.providerLabel || 'AI'} · 模型：${config.defaultModel}`,
+    config.provider === 'deepseek' ? `思考：${config.deepseekThinkingEnabled ? '开启' : '关闭'}` : '',
+    config.fallbackAvailable ? '故障时备用讯飞' : '',
+    config.reviewEnabled ? `审查：${config.reviewProviderLabel || '已开启'}` : '审查：关闭',
+    `上下文：${config.contextMode === 'recent' ? `最近 ${config.contextRecentMessages} 条` : '仅当前消息'}`,
+  ].filter(Boolean).join(' · ');
   app.innerHTML = `<div class="ai-page">
     <aside class="ai-sidebar card">
       <div class="ai-sidebar-head">
@@ -1112,7 +1173,7 @@ async function renderAiPage() {
     </aside>
     <section class="ai-chat card">
       ${session ? `<div class="ai-chat-head">
-        <div><h1 class="ai-session-title">${aiSessionTitle(session)}</h1><p class="muted small">${esc(config.providerLabel || 'AI')} · 模型：${esc(config.defaultModel)} · 上下文：${esc(config.contextMode === 'recent' ? `最近 ${config.contextRecentMessages} 条` : '仅当前消息')}</p></div>
+        <div><h1 class="ai-session-title">${aiSessionTitle(session)}</h1><p class="muted small">${esc(providerNotes)}</p></div>
         <div class="row button-row"><button type="button" onclick="renameAiSession(${esc(session.id)})">重命名</button><button type="button" class="danger" onclick="deleteAiSession(${esc(session.id)})">删除</button></div>
       </div>
       ${disabledReason ? `<div class="error">${esc(disabledReason)}</div>` : ''}
@@ -1918,7 +1979,7 @@ async function renderAdmin() {
       </div>
       <div class="admin-action-card">
         <h2>你好小轻</h2>
-        <div class="admin-action-buttons">${routeLink('/admin/ai', '配置小轻', 'btn primary')}${routeLink('/ai', '打开小轻', 'btn')}</div>
+        <div class="admin-action-buttons">${routeLink('/admin/ai', '配置小轻', 'btn primary')}${routeLink('/admin/ai/usage', '用量统计', 'btn')}${routeLink('/ai', '打开小轻', 'btn')}</div>
       </div>
     </div>
   </div>`;
@@ -1966,24 +2027,48 @@ async function renderAdminAiSettings() {
   if (currentUser?.role !== 'admin') return renderLogin();
   const data = await api('/api/admin/ai-settings');
   const s = data.settings || {};
-  app.innerHTML = `<div class="row space page-head"><div><h1>小轻配置</h1></div><button onclick="nav('/admin')">返回后台</button></div>
+  const keys = data.keyStatus || {};
+  const keyChip = (label, ready, env) => `<div class="ai-key-chip ${ready ? 'ready' : 'missing'}"><span>${esc(label)}</span><b>${ready ? '已配置' : '未配置'}</b><small>${esc(env)}</small></div>`;
+  app.innerHTML = `<div class="row space page-head"><div><h1>小轻配置</h1><p class="muted">统一管理主模型、备用服务、教学审查和使用额度。</p></div><div class="row button-row">${routeLink('/admin/ai/usage', '查看用量', 'btn')}${routeLink('/admin', '返回后台', 'btn')}</div></div>
+  <div class="ai-key-status-grid">${keyChip('讯飞星辰', keys.xfyun, 'XFYUN_API_KEY')}${keyChip('DeepSeek', keys.deepseek, 'DEEPSEEK_API_KEY')}</div>
   <div class="card ai-settings-card">
-    <div class="${data.hasApiKey ? 'success' : 'error'}">${data.hasApiKey ? `${esc(s.providerLabel || 'AI')} API Key 已在服务端环境变量 ${esc(s.apiKeyEnv || '')} 中配置。` : `尚未配置 ${esc(s.apiKeyEnv || 'AI_API_KEY')}，你好小轻会返回不可用提示。`}</div>
-    <form id="aiSettingsForm" class="grid two">
-      <label class="checkbox-line"><input type="checkbox" name="enabled" ${s.enabled ? 'checked' : ''} /> 启用你好小轻</label>
-      <label>服务商<select name="provider"><option value="xfyun" ${s.provider === 'xfyun' ? 'selected' : ''}>讯飞星辰</option><option value="deepseek" ${s.provider === 'deepseek' ? 'selected' : ''}>DeepSeek</option></select></label>
-      <label>BASE URL<input name="baseUrl" value="${esc(s.baseUrl || '')}" /></label>
-      <label>默认模型<input name="defaultModel" value="${esc(s.defaultModel || 'xopqwen36v35b')}" /></label>
-      <label>每用户每日最大请求数<input name="maxRequestsPerUserPerDay" type="number" min="1" max="1000" value="${esc(s.maxRequestsPerUserPerDay || 50)}" /></label>
-      <label>最大输入字符数<input name="maxInputChars" type="number" min="100" max="100000" value="${esc(s.maxInputChars || 12000)}" /></label>
-      <label>最大输出 tokens<input name="maxOutputTokens" type="number" min="128" max="32000" value="${esc(s.maxOutputTokens || 2048)}" /></label>
-      <label>每用户历史上限 MB<input name="maxHistoryMbPerUser" type="number" min="1" max="1024" value="${esc(s.maxHistoryMbPerUser || 5)}" /></label>
-      <label>上下文模式<select name="contextMode"><option value="none" ${s.contextMode === 'none' ? 'selected' : ''}>none：只发送当前消息</option><option value="recent" ${s.contextMode !== 'none' ? 'selected' : ''}>recent：发送最近消息</option></select></label>
-      <label>最近上下文消息数<input name="contextRecentMessages" type="number" min="0" max="50" value="${esc(s.contextRecentMessages ?? 6)}" /></label>
-      <label class="checkbox-line"><input type="checkbox" name="reviewEnabled" ${s.reviewEnabled ? 'checked' : ''} /> 启用二次审查</label>
-      <label class="ai-system-prompt-field">首次提示词<textarea name="systemPrompt" rows="10">${esc(s.systemPrompt || '')}</textarea></label>
-      <label class="ai-review-prompt-field">二次审查提示词<textarea name="reviewPrompt" rows="10">${esc(s.reviewPrompt || '')}</textarea></label>
-      <div class="form-actions"><button class="primary">保存配置</button></div>
+    <form id="aiSettingsForm" class="ai-settings-form">
+      <section class="ai-settings-section">
+        <div class="ai-settings-section-head"><div><h2>主模型与备用服务</h2><p>切换服务商后，所有新请求立即使用新的全局配置。</p></div><label class="checkbox-line"><input type="checkbox" name="enabled" ${s.enabled ? 'checked' : ''} /> 启用你好小轻</label></div>
+        <div class="grid two">
+          <label>当前主服务商<select name="provider"><option value="xfyun" ${s.provider === 'xfyun' ? 'selected' : ''}>讯飞星辰</option><option value="deepseek" ${s.provider === 'deepseek' ? 'selected' : ''}>DeepSeek</option></select></label>
+          <label class="checkbox-line ai-setting-toggle"><input type="checkbox" name="fallbackToXfyun" ${s.fallbackToXfyun ? 'checked' : ''} /> DeepSeek 故障时自动降级到讯飞</label>
+          <label>讯飞 BASE URL<input name="xfyunBaseUrl" value="${esc(s.xfyunBaseUrl || '')}" /></label>
+          <label>讯飞模型<input name="xfyunModel" value="${esc(s.xfyunModel || 'xopqwen36v35b')}" /></label>
+          <label>DeepSeek BASE URL<input name="deepseekBaseUrl" value="${esc(s.deepseekBaseUrl || 'https://api.deepseek.com')}" /></label>
+          <label>DeepSeek 模型<input name="deepseekModel" value="${esc(s.deepseekModel || 'deepseek-v4-flash')}" /></label>
+          <label>DeepSeek 思考模式<select name="deepseekThinkingEnabled"><option value="0" ${!s.deepseekThinkingEnabled ? 'selected' : ''}>关闭：响应更快、成本更低</option><option value="1" ${s.deepseekThinkingEnabled ? 'selected' : ''}>开启：使用 high 推理强度</option></select></label>
+        </div>
+      </section>
+      <section class="ai-settings-section">
+        <div class="ai-settings-section-head"><div><h2>教学审查</h2><p>开启后，第一轮草稿不会展示；审查模型结合原问题、上下文和用户角色输出最终回复。</p></div><label class="checkbox-line"><input type="checkbox" name="reviewEnabled" ${s.reviewEnabled ? 'checked' : ''} /> 启用二次审查</label></div>
+        <div class="grid two">
+          <label>审查服务商<select name="reviewProvider"><option value="xfyun" ${s.reviewProvider === 'xfyun' ? 'selected' : ''}>讯飞星辰</option><option value="deepseek" ${s.reviewProvider === 'deepseek' ? 'selected' : ''}>DeepSeek</option><option value="same" ${s.reviewProvider === 'same' ? 'selected' : ''}>跟随主服务商</option></select></label>
+          <label>审查模型<input name="reviewModel" value="${esc(s.reviewModel || 'xopqwen36v35b')}" /></label>
+        </div>
+      </section>
+      <section class="ai-settings-section">
+        <div class="ai-settings-section-head"><div><h2>额度与上下文</h2><p>每日次数按学生发出的消息计算；Token 统计包含生成、审查和降级调用。</p></div></div>
+        <div class="grid three ai-limit-grid">
+          <label>每用户每日最大请求数<input name="maxRequestsPerUserPerDay" type="number" min="1" max="1000" value="${esc(s.maxRequestsPerUserPerDay || 30)}" /></label>
+          <label>最大输入字符数<input name="maxInputChars" type="number" min="100" max="100000" value="${esc(s.maxInputChars || 12000)}" /></label>
+          <label>最大输出 tokens<input name="maxOutputTokens" type="number" min="128" max="32000" value="${esc(s.maxOutputTokens || 2048)}" /></label>
+          <label>每用户历史上限 MB<input name="maxHistoryMbPerUser" type="number" min="1" max="1024" value="${esc(s.maxHistoryMbPerUser || 5)}" /></label>
+          <label>上下文模式<select name="contextMode"><option value="none" ${s.contextMode === 'none' ? 'selected' : ''}>仅当前消息</option><option value="recent" ${s.contextMode !== 'none' ? 'selected' : ''}>最近消息</option></select></label>
+          <label>最近上下文消息数<input name="contextRecentMessages" type="number" min="0" max="50" value="${esc(s.contextRecentMessages ?? 6)}" /></label>
+        </div>
+      </section>
+      <section class="ai-settings-section ai-prompt-section">
+        <div class="ai-settings-section-head"><div><h2>提示词</h2><p>系统会额外注入当前用户角色；API Key 不会进入提示词或数据库。</p></div></div>
+        <label class="ai-system-prompt-field">首次提示词<textarea name="systemPrompt" rows="10">${esc(s.systemPrompt || '')}</textarea></label>
+        <label class="ai-review-prompt-field">二次审查提示词<textarea name="reviewPrompt" rows="10">${esc(s.reviewPrompt || '')}</textarea></label>
+      </section>
+      <div class="form-actions ai-settings-save"><button class="primary">保存配置</button></div>
     </form>
     <p class="muted small">API Key 只能通过服务端环境变量配置：讯飞星辰使用 <code>XFYUN_API_KEY</code>，DeepSeek 使用 <code>DEEPSEEK_API_KEY</code>。密钥不会保存到数据库，也不会暴露给前端。</p>
     <div id="aiSettingsMsg"></div>
@@ -1997,8 +2082,12 @@ async function renderAdminAiSettings() {
         body: {
           enabled: Boolean(event.target.enabled.checked),
           provider: f.provider,
-          baseUrl: f.baseUrl,
-          defaultModel: f.defaultModel,
+          xfyunBaseUrl: f.xfyunBaseUrl,
+          xfyunModel: f.xfyunModel,
+          deepseekBaseUrl: f.deepseekBaseUrl,
+          deepseekModel: f.deepseekModel,
+          deepseekThinkingEnabled: f.deepseekThinkingEnabled === '1',
+          fallbackToXfyun: Boolean(event.target.fallbackToXfyun.checked),
           maxRequestsPerUserPerDay: Number(f.maxRequestsPerUserPerDay),
           maxInputChars: Number(f.maxInputChars),
           maxOutputTokens: Number(f.maxOutputTokens),
@@ -2006,6 +2095,8 @@ async function renderAdminAiSettings() {
           contextMode: f.contextMode,
           contextRecentMessages: Number(f.contextRecentMessages),
           reviewEnabled: Boolean(event.target.reviewEnabled.checked),
+          reviewProvider: f.reviewProvider,
+          reviewModel: f.reviewModel,
           systemPrompt: f.systemPrompt,
           reviewPrompt: f.reviewPrompt,
         },
@@ -2014,6 +2105,51 @@ async function renderAdminAiSettings() {
     } catch (err) {
       showInlineError('#aiSettingsMsg', err);
     }
+  };
+  qs('[name="reviewProvider"]', qs('#aiSettingsForm'))?.addEventListener('change', (event) => {
+    const form = qs('#aiSettingsForm');
+    const provider = event.target.value === 'same' ? qs('[name="provider"]', form).value : event.target.value;
+    qs('[name="reviewModel"]', form).value = provider === 'deepseek'
+      ? qs('[name="deepseekModel"]', form).value
+      : qs('[name="xfyunModel"]', form).value;
+  });
+  qs('[name="provider"]', qs('#aiSettingsForm'))?.addEventListener('change', (event) => {
+    const form = qs('#aiSettingsForm');
+    if (qs('[name="reviewProvider"]', form).value !== 'same') return;
+    qs('[name="reviewModel"]', form).value = event.target.value === 'deepseek'
+      ? qs('[name="deepseekModel"]', form).value
+      : qs('[name="xfyunModel"]', form).value;
+  });
+}
+
+async function renderAdminAiUsage() {
+  setImmersive(false);
+  if (currentUser?.role !== 'admin') return renderLogin();
+  const params = new URLSearchParams(location.search);
+  const days = [7, 30, 90].includes(Number(params.get('days'))) ? Number(params.get('days')) : 30;
+  const data = await api(`/api/admin/ai-usage?days=${days}`);
+  const s = data.summary || {};
+  const users = data.users || [];
+  const providers = data.providers || [];
+  const errors = data.recentErrors || [];
+  app.innerHTML = `<div class="row space page-head"><div><h1>小轻用量统计</h1><p class="muted">费用根据 DeepSeek 返回的 Token 和 LiteOJ 1.5.0 内置价格快照估算，不代表实时账单；讯飞只统计调用次数。</p></div><div class="row button-row">${routeLink('/admin/ai', '配置小轻', 'btn')}${routeLink('/admin', '返回后台', 'btn')}</div></div>
+  <form id="aiUsageFilter" class="card ai-usage-filter"><label>统计范围<select name="days"><option value="7" ${days === 7 ? 'selected' : ''}>最近 7 天</option><option value="30" ${days === 30 ? 'selected' : ''}>最近 30 天</option><option value="90" ${days === 90 ? 'selected' : ''}>最近 90 天</option></select></label><button class="primary">查看</button></form>
+  <div class="admin-stat-strip ai-usage-stat-strip">
+    <div><b>${formatCount(s.userRequests)}</b><span>用户提问</span></div>
+    <div><b>${formatCount(s.upstreamCalls)}</b><span>上游调用</span></div>
+    <div><b>${formatCount(s.reviewCalls)}</b><span>审查调用</span></div>
+    <div><b>${formatCount(Number(s.failedCalls || 0) + Number(s.interruptedCalls || 0))}</b><span>失败 / 中断</span></div>
+    <div><b>${formatCount(s.fallbackCalls)}</b><span>备用接续</span></div>
+    <div><b>${formatEstimatedCost(s.estimatedCostCny)}</b><span>DeepSeek 估算</span></div>
+  </div>
+  <section class="card table-card ai-usage-table-card"><div class="section-title-row"><div><h2>用户用量</h2><p class="muted small">输入、输出和推理 Token 均包含二次审查调用。</p></div></div><table><thead><tr><th>用户</th><th>提问</th><th>上游</th><th>审查</th><th>输入 Token</th><th>输出 Token</th><th>推理 Token</th><th>备用</th><th>失败</th><th>估算费用</th></tr></thead><tbody>${users.map((row) => `<tr><td><b>${esc(row.username)}</b><div class="muted small">${esc(row.role)}</div></td><td>${formatCount(row.userRequests)}</td><td>${formatCount(row.upstreamCalls)}</td><td>${formatCount(row.reviewCalls)}</td><td>${formatCount(row.inputTokens)}</td><td>${formatCount(row.outputTokens)}</td><td>${formatCount(row.reasoningTokens)}</td><td>${formatCount(row.fallbackCalls)}</td><td>${formatCount(Number(row.failedCalls || 0) + Number(row.interruptedCalls || 0))}</td><td>${formatEstimatedCost(row.estimatedCostCny)}</td></tr>`).join('') || '<tr><td colspan="10" class="muted">暂无用户用量</td></tr>'}</tbody></table></section>
+  <div class="grid two ai-usage-detail-grid">
+    <section class="card table-card"><h2>服务商与模型</h2><table><thead><tr><th>服务商</th><th>模型</th><th>调用</th><th>失败</th><th>Token</th><th>估算费用</th></tr></thead><tbody>${providers.map((row) => `<tr><td>${esc(row.provider)}</td><td>${esc(row.model)}</td><td>${formatCount(row.upstreamCalls)}</td><td>${formatCount(row.failedCalls)}</td><td>${formatCount(Number(row.inputTokens || 0) + Number(row.outputTokens || 0))}</td><td>${formatEstimatedCost(row.estimatedCostCny)}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">暂无调用</td></tr>'}</tbody></table></section>
+    <section class="card table-card"><h2>最近异常</h2><table><thead><tr><th>时间</th><th>用户</th><th>阶段</th><th>服务商</th><th>原因</th></tr></thead><tbody>${errors.map((row) => `<tr><td>${esc(formatUtc8Time(row.createdAt))}</td><td>${esc(row.username)}</td><td>${row.phase === 'review' ? '审查' : '生成'}</td><td>${esc(row.provider)}</td><td><code>${esc(row.errorCode || row.httpStatus || row.status)}</code></td></tr>`).join('') || '<tr><td colspan="5" class="muted">当前范围内没有异常</td></tr>'}</tbody></table></section>
+  </div>`;
+  qs('#aiUsageFilter').onsubmit = (event) => {
+    event.preventDefault();
+    nav(`/admin/ai/usage?days=${encodeURIComponent(formData(event.target).days)}`);
   };
 }
 
@@ -3266,6 +3402,7 @@ async function render() {
     if (path === '/admin') return await renderAdmin();
     if (path === '/admin/users') return await renderUserAdmin();
     if (path === '/admin/ai') return await renderAdminAiSettings();
+    if (path === '/admin/ai/usage') return await renderAdminAiUsage();
     if (path === '/admin/problems') return await renderProblemManage();
     if (path === '/admin/prelim') return await renderPrelimAdmin();
     if (path === '/admin/prelim/import') return await renderPrelimImport();

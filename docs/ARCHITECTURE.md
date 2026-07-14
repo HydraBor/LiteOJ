@@ -51,6 +51,7 @@ go-judge container
 - `backend/problem-files.js`：题目目录、测试点、附件、checker.cpp 文件路径。
 - `backend/tag-service.js`：统一标签词典、slug 校验、标签关系表同步。
 - `backend/settings.js`：站点配置读写，当前用于 AI 对话参数。
+- `backend/ai-provider.js`：讯飞/DeepSeek 请求体、SSE 解析、超时、错误归一化和 DeepSeek 用量估算。
 - `backend/prelim-utils.js`：CSP 初赛 Markdown 解析和题型归一化。
 - `backend/routes/*`：按业务域拆分的 API。
 
@@ -197,7 +198,10 @@ testlib 中 `registerTestlibCmd(argc, argv)` 会据此初始化 `inf`、`ouf`、
 - AI 对话 API Key 只从服务端环境变量读取。讯飞星辰使用 `XFYUN_API_KEY`，DeepSeek 使用 `DEEPSEEK_API_KEY`；前端只能看到是否已配置 key，不能读取 key 内容。
 - AI 会话不接入题库、提交记录或标签分析，上游模型请求只发送系统提示词和当前会话上下文。
 - AI 历史空间默认每用户 5MB，可在后台通过 `ai.max_history_mb_per_user` 调整；删除单个或批量删除会话会释放该用户的历史额度。
-- AI 助教模式使用两段提示词：首次提示词随用户消息和最近上下文发送；启用二次审查时，首次回复会在服务端缓冲，再用“二次审查提示词 + 首次回复”单独调用上游模型，不携带上下文，最终只展示审查后的回复。
+- AI 助教模式使用两段提示词：首次提示词随用户消息和最近上下文发送；启用二次审查时，首次回复只在内存中缓冲，审查模型同时接收用户角色、原问题、最近上下文和草稿，最终只展示并保存审查后的回复。
+- DeepSeek 的思维链字段不会发送到前端或持久化；系统只保存最终消息状态和官方 Token 统计。
+- DeepSeek 自动降级仅面向讯飞，且只处理认证、余额、限流、网络/超时和服务端故障；参数错误保留为管理员可见异常。
+- AI 调用用量存入 `ai_usage_events`，与会话消息分离。删除会话会释放消息空间，但保留去关联后的聚合用量记录。
 
 ## 参考资料
 

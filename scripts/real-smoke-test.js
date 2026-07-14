@@ -1,5 +1,6 @@
 const assert = require('assert');
 const fs = require('fs');
+const http = require('http');
 const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
@@ -8,7 +9,14 @@ const AdmZip = require('adm-zip');
 const root = path.join(__dirname, '..');
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'liteoj-smoke-'));
 const port = 3100 + Math.floor(Math.random() * 1000);
-const env = { ...process.env, DATA_DIR: dataDir, PORT: String(port), NODE_ENV: 'test' };
+const env = {
+  ...process.env,
+  DATA_DIR: dataDir,
+  PORT: String(port),
+  NODE_ENV: 'test',
+  XFYUN_API_KEY: 'smoke-xfyun-key',
+  DEEPSEEK_API_KEY: 'smoke-deepseek-key',
+};
 process.env.DATA_DIR = dataDir;
 process.env.NODE_ENV = 'test';
 process.env.PORT = String(port);
@@ -39,6 +47,43 @@ async function waitForServer() {
 }
 
 let cookie = '';
+const aiMockRequests = [];
+const aiMockServer = http.createServer((req, res) => {
+  if (req.method !== 'POST' || req.url !== '/chat/completions') {
+    res.writeHead(404).end();
+    return;
+  }
+  let raw = '';
+  req.on('data', (chunk) => { raw += chunk.toString(); });
+  req.on('end', () => {
+    let body = {};
+    try { body = JSON.parse(raw); } catch (_) {}
+    aiMockRequests.push(body);
+    const isDeepSeek = String(body.model || '').startsWith('deepseek-');
+    const isReview = String(body.messages?.[0]?.content || '').includes('最终回复审查器');
+    const allText = (body.messages || []).map((message) => message.content || '').join('\n');
+    if (isDeepSeek && allText.includes('[force-fallback]')) {
+      res.writeHead(402, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: { message: 'smoke insufficient balance' } }));
+      return;
+    }
+    const content = isReview
+      ? '这是经过教学审查的最终回复。先说说你目前的思路，我们再一起完成下一步。'
+      : '这是不会直接展示给学生的第一轮草稿。';
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.write(': keep-alive\n\n');
+    if (isDeepSeek) {
+      res.write(`data: ${JSON.stringify({ model: body.model, choices: [{ index: 0, delta: { reasoning_content: 'hidden reasoning' }, finish_reason: null }] })}\n\n`);
+    }
+    const middle = Math.ceil(content.length / 2);
+    for (const part of [content.slice(0, middle), content.slice(middle)]) {
+      res.write(`data: ${JSON.stringify({ model: body.model, choices: [{ index: 0, delta: { content: part }, finish_reason: null }] })}\n\n`);
+    }
+    res.write(`data: ${JSON.stringify({ model: body.model, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`);
+    res.write(`data: ${JSON.stringify({ model: body.model, choices: [], usage: { prompt_tokens: 20, completion_tokens: 10, prompt_cache_hit_tokens: isDeepSeek ? 5 : 0, prompt_cache_miss_tokens: 15, completion_tokens_details: { reasoning_tokens: isDeepSeek ? 4 : 0 } } })}\n\n`);
+    res.end('data: [DONE]\n\n');
+  });
+});
 async function request(method, url, body, opts = {}) {
   const headers = { ...(opts.headers || {}) };
   let finalBody = body;
@@ -58,6 +103,11 @@ async function request(method, url, body, opts = {}) {
 }
 
 async function main() {
+  await new Promise((resolve, reject) => {
+    aiMockServer.once('error', reject);
+    aiMockServer.listen(0, '127.0.0.1', resolve);
+  });
+  const aiMockBaseUrl = `http://127.0.0.1:${aiMockServer.address().port}`;
   await waitForServer();
   for (const route of ['/admin/problem/new', '/admin/problem/P1001/edit', '/admin/problem/P1001/data', '/prelim', '/prelim/mock', '/ai', '/admin/ai']) {
     const res = await fetch(`http://127.0.0.1:${port}${route}`);
@@ -78,9 +128,13 @@ async function main() {
   assert.strictEqual(aiSettings.settings.maxHistoryMbPerUser, 5, 'AI history quota should default to 5 MB per user');
   const savedAiSettings = await request('PUT', '/api/admin/ai-settings', {
     enabled: true,
-    provider: 'xfyun',
-    baseUrl: 'https://maas-coding-api.cn-huabei-1.xf-yun.com/v2',
-    defaultModel: 'xopqwen36v35b',
+    provider: 'deepseek',
+    xfyunBaseUrl: aiMockBaseUrl,
+    xfyunModel: 'xopqwen36v35b',
+    deepseekBaseUrl: aiMockBaseUrl,
+    deepseekModel: 'deepseek-v4-flash',
+    deepseekThinkingEnabled: true,
+    fallbackToXfyun: true,
     maxRequestsPerUserPerDay: 5,
     maxInputChars: 12000,
     maxOutputTokens: 512,
@@ -88,16 +142,20 @@ async function main() {
     contextMode: 'recent',
     contextRecentMessages: 6,
     reviewEnabled: true,
+    reviewProvider: 'xfyun',
+    reviewModel: 'xopqwen36v35b',
     systemPrompt: aiSettings.settings.systemPrompt,
     reviewPrompt: aiSettings.settings.reviewPrompt,
   });
   assert.strictEqual(savedAiSettings.settings.contextMode, 'recent', 'admin should save AI context mode');
   assert.strictEqual(savedAiSettings.settings.maxHistoryMbPerUser, 5, 'admin should save AI history quota');
   assert.strictEqual(savedAiSettings.settings.reviewEnabled, true, 'admin should save AI second-pass review switch');
-  assert(savedAiSettings.settings.reviewPrompt.includes('回复审查器'), 'admin should save AI second-pass review prompt');
-  assert.strictEqual(savedAiSettings.settings.apiKeyEnv, 'XFYUN_API_KEY', 'Xunfei provider should read the XFYUN_API_KEY environment variable');
+  assert.strictEqual(savedAiSettings.settings.reviewProvider, 'xfyun', 'admin should save an independent review provider');
+  assert(savedAiSettings.settings.reviewPrompt.includes('最终回复审查器'), 'admin should save AI second-pass review prompt');
+  assert.strictEqual(savedAiSettings.settings.apiKeyEnv, 'DEEPSEEK_API_KEY', 'DeepSeek provider should read the DEEPSEEK_API_KEY environment variable');
   const aiConfig = await request('GET', '/api/ai/config');
-  assert.strictEqual(aiConfig.defaultModel, 'xopqwen36v35b', 'AI user config should expose the selected model but not the key');
+  assert.strictEqual(aiConfig.defaultModel, 'deepseek-v4-flash', 'AI user config should expose the selected DeepSeek model but not the key');
+  assert.strictEqual(aiConfig.deepseekThinkingEnabled, true, 'AI user config should reflect the global DeepSeek thinking mode');
   assert.strictEqual(aiConfig.historyLimitBytes, 5 * 1024 * 1024, 'AI user config should expose history quota bytes');
   assert.strictEqual(Object.prototype.hasOwnProperty.call(aiConfig, 'apiKey'), false, 'AI config must not expose the API key');
   const aiSession = await request('POST', '/api/ai/sessions', { title: '烟测 AI 会话' });
@@ -112,7 +170,36 @@ async function main() {
     headers: { Cookie: cookie, 'Content-Type': 'application/json' },
     body: JSON.stringify({ content: '你好' }),
   });
-  assert.strictEqual(aiMessageRes.status, 503, 'AI message should fail clearly when XFYUN_API_KEY is not configured in smoke env');
+  assert.strictEqual(aiMessageRes.status, 200, 'DeepSeek generation plus Xunfei review should stream successfully');
+  const firstAiStream = await aiMessageRes.text();
+  assert(firstAiStream.includes('经过教学审查的最终回复'), 'only the reviewed answer should be streamed to the user');
+  assert(!firstAiStream.includes('第一轮草稿'), 'the unreviewed draft must never reach the browser');
+  const deepSeekCall = aiMockRequests.find((body) => String(body.model || '').startsWith('deepseek-'));
+  assert.strictEqual(deepSeekCall.thinking.type, 'enabled', 'DeepSeek request should explicitly enable configured thinking mode');
+  assert.strictEqual(deepSeekCall.reasoning_effort, 'high', 'DeepSeek thinking should use high reasoning effort');
+  assert.strictEqual(deepSeekCall.stream_options.include_usage, true, 'DeepSeek stream should request usage totals');
+  assert(/^liteoj_[a-f0-9]{32}$/.test(deepSeekCall.user_id), 'DeepSeek request should use a pseudonymous per-user id');
+  const reviewedDetail = await request('GET', `/api/ai/sessions/${aiSession.session.id}`);
+  assert.strictEqual(reviewedDetail.messages[1].provider, 'xfyun', 'saved final reply should record the review provider');
+  assert.strictEqual(reviewedDetail.messages[1].status, 'complete', 'saved reviewed reply should be complete');
+  assert(!reviewedDetail.messages[1].content.includes('第一轮草稿'), 'database should not save the hidden draft');
+
+  const fallbackRes = await fetch(`http://127.0.0.1:${port}/api/ai/sessions/${aiSession.session.id}/messages`, {
+    method: 'POST',
+    headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: '请继续讲解 [force-fallback]' }),
+  });
+  assert.strictEqual(fallbackRes.status, 200, 'DeepSeek 402 should fall back to Xunfei');
+  const fallbackStream = await fallbackRes.text();
+  assert(fallbackStream.includes('event: stage') && fallbackStream.includes('正在切换备用模型'), 'fallback should emit a clear stream stage');
+  const fallbackDetail = await request('GET', `/api/ai/sessions/${aiSession.session.id}`);
+  assert.strictEqual(fallbackDetail.messages.at(-1).isFallback, true, 'final reply should record that backup generation was used');
+  const usage = await request('GET', '/api/admin/ai-usage?days=7');
+  const adminUsage = usage.users.find((row) => row.username === 'admin');
+  assert(adminUsage.upstreamCalls >= 5, 'usage analytics should count generation, review, failed primary, fallback, and fallback review calls');
+  assert(adminUsage.reasoningTokens >= 4, 'usage analytics should record DeepSeek reasoning tokens without storing reasoning content');
+  assert(adminUsage.fallbackCalls >= 1, 'usage analytics should count successful fallback calls');
+  assert(usage.recentErrors.some((row) => row.errorCode === 'insufficient_balance'), 'usage analytics should expose a sanitized DeepSeek 402 reason to admins');
   const aiUserName = `ai${Date.now()}`;
   await request('POST', '/api/auth/register', { username: aiUserName, password: 'aipass1' });
   const foreignAiRes = await fetch(`http://127.0.0.1:${port}/api/ai/sessions/${aiSession.session.id}`, { headers: { Cookie: cookie } });
@@ -323,6 +410,7 @@ main().catch((err) => {
   process.exitCode = 1;
 }).finally(() => {
   server.kill('SIGTERM');
+  aiMockServer.close();
   smokeDb.close();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });

@@ -175,13 +175,33 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospac
 .problem-statement .tok-keyword { color: #1d4ed8; }
 .problem-statement .tok-string { color: #047857; }
 .problem-statement .tok-comment { color: #64748b; }
-.markdown { line-height: 1.7; white-space: normal; }
+.markdown {
+  min-width: 0;
+  max-width: 100%;
+  line-height: 1.7;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 .markdown p { margin: 0 0 12px; }
 .markdown h2, .markdown h3, .markdown h4, .markdown h5 { margin: 20px 0 10px; }
 .markdown ul { margin: 8px 0 14px 24px; padding: 0; }
-.markdown code { background: #f1f4f9; color: #b42318; border-radius: 4px; padding: 1px 5px; }
-.markdown pre code { background: transparent; color: inherit; padding: 0; }
-.math-block { overflow-x: auto; padding: 10px 0; }
+.markdown code {
+  background: #f1f4f9;
+  color: #b42318;
+  border-radius: 4px;
+  padding: 1px 5px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.markdown pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.math-block { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: 10px 0; }
 .preview-box { border: 1px solid var(--line); background: #fbfcff; border-radius: 10px; padding: 14px; margin: 8px 0 14px; min-height: 52px; }
 .small-preview { min-height: 40px; }
 
@@ -1000,6 +1020,12 @@ body.auth-page .container { max-width: 520px; margin-top: 56px; }
   gap: 18px;
   align-items: stretch;
 }
+.mock-report-question-grid > *,
+.mock-report-original,
+.mock-report-analysis {
+  min-width: 0;
+  max-width: 100%;
+}
 .mock-report-block-title {
   margin-bottom: 10px;
   color: #667085;
@@ -1069,6 +1095,13 @@ body.auth-page .container { max-width: 520px; margin-top: 56px; }
   padding: 14px 16px;
 }
 .mock-report-analysis .markdown { flex: 1; line-height: 1.78; }
+.mock-report-analysis .katex {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  vertical-align: middle;
+}
 
 @media (max-width: 1180px) {
   .compact-prelim-filter { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }

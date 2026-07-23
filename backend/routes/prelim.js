@@ -42,7 +42,7 @@ function groupSelectSql(userId = 0) {
   return `SELECT g.*, p.title AS paper_title, p.year, p.group_name, p.round_name,
       MIN(q.number) AS first_question_number,
       COUNT(DISTINCT q.id) AS question_count,
-      COALESCE(SUM(q.score), 0) AS score,
+      (SELECT COALESCE(SUM(sq.score), 0) FROM prelim_questions sq WHERE sq.group_id = g.id) AS score,
       COUNT(a.id) AS attempt_count,
       COUNT(CASE WHEN a.is_correct = 1 THEN 1 END) AS correct_count,
       ${uid ? `(SELECT COUNT(*) FROM prelim_questions qq WHERE qq.group_id = g.id AND EXISTS (SELECT 1 FROM prelim_attempts aa WHERE aa.question_id = qq.id AND aa.user_id = ${uid}))` : '0'} AS user_attempted_count,

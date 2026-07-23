@@ -261,6 +261,7 @@ assert(appJs.includes('name="specialJudge"') && appJs.includes('renderCheckerPan
 const prelimRoutes = fs.readFileSync(path.join(__dirname, '..', 'backend', 'routes', 'prelim.js'), 'utf8');
 assert(prelimRoutes.includes('truthPaperTitle') && prelimRoutes.includes('displayMockExamTitle') && prelimRoutes.includes('真题卷'), 'prelim true-paper flow should name papers as 真题卷 and normalize old mock titles');
 assert(prelimRoutes.includes('CAST(p.year AS TEXT) LIKE ?') && prelimRoutes.includes('kq.options_json LIKE ?') && prelimRoutes.includes('kt.name_zh LIKE ?'), 'prelim keyword search should include year, options, and canonical tags');
+assert(prelimRoutes.includes('(SELECT COALESCE(SUM(sq.score), 0) FROM prelim_questions sq WHERE sq.group_id = g.id) AS score') && !prelimRoutes.includes('COALESCE(SUM(q.score), 0) AS score'), 'prelim item scores should be aggregated independently from repeated answer attempts');
 for (const route of ["router.get('/items'", "router.get('/items/:id'", "router.post('/questions/:id/check'", "router.post('/import-md'", "router.get('/facets'", "router.get('/mock/papers'", "router.post('/mock/start'", "router.post('/mock/exams/:id/submit'", 'scoreTotalForMock', 'clampScoreToTotal']) {
   assert(prelimRoutes.includes(route), `missing prelim backend route ${route}`);
 }
@@ -421,6 +422,7 @@ assert(styleCss.includes('-webkit-backdrop-filter: blur(10px); backdrop-filter: 
 assert(styleCss.includes('.tag-check-list') && styleCss.includes('.tag-search-input') && styleCss.includes('.align-center'), 'stylesheet should support tag checkbox search and Markdown table alignment');
 assert(styleCss.includes('.md-align-center') && styleCss.includes('.md-cute-table'), 'stylesheet should support custom Markdown alignment and cute table rendering');
 assert(styleCss.includes('.markdown .md-hr') && styleCss.includes('linear-gradient(90deg'), 'stylesheet should render Markdown horizontal rules softly');
+assert(styleCss.includes('overflow-wrap: anywhere') && styleCss.includes('.mock-report-question-grid > *') && styleCss.includes('.mock-report-analysis .katex'), 'mock reports should contain long inline code and formulas without widening the page');
 assert(styleCss.includes('.md-table .col-last') && !styleCss.includes('.md-table th:last-child') && !styleCss.includes('.md-table tr:last-child td'), 'Markdown table borders should be based on logical columns and keep the closing bottom line');
 assert(appJs.includes('function enhanceFormAccessibility') && appJs.includes('ensureControlId') && appJs.includes('aria-label'), 'dynamic forms should be normalized with id/name/label accessibility helpers');
 

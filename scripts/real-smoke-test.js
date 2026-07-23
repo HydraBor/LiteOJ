@@ -373,6 +373,25 @@ async function main() {
   assert.strictEqual(oldFinalRes.status, 404, 'old problem id should no longer exist after rename');
   const prelimItems = await request('GET', '/api/prelim/items');
   assert(prelimItems.items.length > 0, 'prelim item list should work');
+  const scoreItem = prelimItems.items[0];
+  const scoreBeforeAttempts = Number(scoreItem.score);
+  const scoreItemDetail = await request('GET', `/api/prelim/items/${scoreItem.id}`);
+  const scoreQuestion = scoreItemDetail.item.questions[0];
+  assert(scoreQuestion, 'prelim item detail should include at least one question');
+  await request('POST', `/api/prelim/questions/${scoreQuestion.id}/check`, { answer: scoreQuestion.answer });
+  const scoreAfterFirstAttempt = await request('GET', '/api/prelim/items');
+  assert.strictEqual(
+    Number(scoreAfterFirstAttempt.items.find((item) => item.id === scoreItem.id).score),
+    scoreBeforeAttempts,
+    'prelim item score should remain fixed after one answer attempt',
+  );
+  await request('POST', `/api/prelim/questions/${scoreQuestion.id}/check`, { answer: scoreQuestion.answer });
+  const scoreAfterSecondAttempt = await request('GET', '/api/prelim/items');
+  assert.strictEqual(
+    Number(scoreAfterSecondAttempt.items.find((item) => item.id === scoreItem.id).score),
+    scoreBeforeAttempts,
+    'prelim item score should remain fixed after repeated answer attempts',
+  );
   const prelim2023 = await request('GET', '/api/prelim/items?keyword=2023');
   assert(prelim2023.items.length > 1, 'prelim keyword search should match all items from a searched year');
   assert(prelim2023.items.every((item) => Number(item.year) === 2023), 'prelim keyword year search should return 2023 items');
